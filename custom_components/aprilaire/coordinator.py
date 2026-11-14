@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+import ipaddress
 import logging
 from typing import Any, override
 
@@ -118,6 +119,9 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
         self.unique_id = config_entry.unique_id if config_entry else None
         self.data: dict[str, Any] = {}
         self._sensor_poll_task: asyncio.Task[None] | None = None
+        self._ip_watchdog_task: asyncio.Task[None] | None = None
+        self._host = host
+        self._port = port
 
         self._listeners: dict[CALLBACK_TYPE, tuple[CALLBACK_TYPE, object | None]] = {}
 
@@ -215,16 +219,93 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
             except Exception:
                 _LOGGER.debug("Periodic sensor poll skipped", exc_info=True)
 
+    async def _rediscover_host_by_mac(self, target_mac: str) -> str | None:
+        """Scan the local /24 subnet for the thermostat's port and verify its MAC."""
+        try:
+            network = ipaddress.ip_network(f"{self._host}/24", strict=False)
+        except ValueError:
+            return None
+
+        sem = asyncio.Semaphore(64)
+
+        async def _probe(ip: str) -> str | None:
+            async with sem:
+                try:
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_connection(ip, self._port), timeout=0.4
+                    )
+                except (OSError, TimeoutError):
+                    return None
+                try:
+                    # Query (8, 2) MAC & Extended ID: [0x01, 0x00, 0x00, 0x00, 0x02, 0x08, 0x02]
+                    frame = bytes([0x01, 0x00, 0x00, 0x00, 0x02, 0x08, 0x02])
+                    writer.write(frame)
+                    await writer.drain()
+                    resp = await asyncio.wait_for(reader.read(64), timeout=0.8)
+                    if len(resp) >= 13 and resp[5] == 0x08 and resp[6] == 0x02:
+                        mac = ":".join(f"{b:02x}" for b in resp[7:13])
+                        if mac.lower() == target_mac.lower():
+                            return ip
+                except (OSError, TimeoutError):
+                    pass
+                finally:
+                    writer.close()
+                    try:
+                        await writer.wait_closed()
+                    except OSError:
+                        pass
+                return None
+
+        results = await asyncio.gather(
+            *(_probe(str(ip)) for ip in network.hosts() if str(ip) != self._host)
+        )
+        return next((ip for ip in results if ip is not None), None)
+
+    async def _ip_watchdog(self) -> None:
+        """If the thermostat is disconnected for >90s, rediscover its IP by MAC."""
+        consecutive_down = 0
+        while True:
+            await asyncio.sleep(30)
+            if getattr(self.client, "protocol", None) is not None:
+                consecutive_down = 0
+                continue
+            consecutive_down += 1
+            if consecutive_down < 3:
+                continue
+            target_mac = self.data.get(Attribute.MAC_ADDRESS)
+            if not target_mac:
+                continue
+            new_ip = await self._rediscover_host_by_mac(str(target_mac))
+            if new_ip and new_ip != self._host:
+                _LOGGER.warning(
+                    "AprilAire thermostat IP changed from %s to %s (matched MAC %s); updating config",
+                    self._host,
+                    new_ip,
+                    target_mac,
+                )
+                self._host = new_ip
+                self.client.host = new_ip
+                if self.config_entry is not None:
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry,
+                        data={**self.config_entry.data, "host": new_ip},
+                    )
+                consecutive_down = 0
+
     async def start_listen(self) -> None:
         """Start listening for data."""
         await self.client.start_listen()
         if self._sensor_poll_task is None or self._sensor_poll_task.done():
             self._sensor_poll_task = asyncio.create_task(self._periodic_sensor_poll())
+        if self._ip_watchdog_task is None or self._ip_watchdog_task.done():
+            self._ip_watchdog_task = asyncio.create_task(self._ip_watchdog())
 
     def stop_listen(self) -> None:
         """Stop listening for data."""
         if self._sensor_poll_task and not self._sensor_poll_task.done():
             self._sensor_poll_task.cancel()
+        if self._ip_watchdog_task and not self._ip_watchdog_task.done():
+            self._ip_watchdog_task.cancel()
         self.client.stop_listen()
 
     async def wait_for_ready(
