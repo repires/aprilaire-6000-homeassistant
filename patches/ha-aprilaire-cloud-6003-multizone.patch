@@ -1,0 +1,363 @@
+diff -ruN -x __pycache__ -x *.pyc -x .DS_Store /Volumes/documents/dev/projects/aprilaire/upstream/ha-aprilaire-cloud/custom_components/aprilaire_cloud/climate.py /Volumes/documents/dev/projects/aprilaire/aprilaire-6000-homeassistant/custom_components/aprilaire_cloud/climate.py
+--- /Volumes/documents/dev/projects/aprilaire/upstream/ha-aprilaire-cloud/custom_components/aprilaire_cloud/climate.py	2026-11-13 20:49:04
++++ /Volumes/documents/dev/projects/aprilaire/aprilaire-6000-homeassistant/custom_components/aprilaire_cloud/climate.py	2026-11-14 01:45:15
+@@ -44,6 +44,9 @@
+ FAN_MODES = ["auto", "on", "circulate"]
+ PRESET_MODES = ["none", "temporary", "permanent", "vacation"]
+ 
++SZ2_LOCK_MIN_C = 18.0
++SZ2_LOCK_MAX_C = 23.0
++
+ RAW_MODE_BY_HA_MODE = {
+     HVACMode.OFF: "off",
+     HVACMode.HEAT: "heat",
+@@ -196,18 +199,21 @@
+         return profile.capabilities(device).commands.get(CommandType.THERMOSTAT_SETPOINTS)
+ 
+     def _setpoints_writable_in_ha(self) -> bool:
+-        """Return whether this beta contract is safe in HA's configured unit system."""
++        """Return whether setpoints are writable in HA (both Celsius and Fahrenheit supported)."""
+         capability = self._setpoint_capability()
+-        return (
+-            capability is not None
+-            and capability.writable
+-            and self.coordinator.hass.config.units.temperature_unit
+-            == UnitOfTemperature.FAHRENHEIT
++        return capability is not None and capability.writable
++
++    def _is_sz2_locked(self) -> bool:
++        """Return True if this is Zone 2 (SZ2) and the 18-23°C lock is active."""
++        return self._zone_key == "SZ2" and getattr(
++            self.coordinator, "sz2_temp_lock_enabled", True
+         )
+ 
+     @property
+     def min_temp(self) -> float:
+         """Return the lower bound of the writable thermostat envelope."""
++        if self._is_sz2_locked():
++            return SZ2_LOCK_MIN_C
+         capability = self._setpoint_capability()
+         if (
+             self._setpoints_writable_in_ha()
+@@ -220,6 +226,8 @@
+     @property
+     def max_temp(self) -> float:
+         """Return the upper bound of the writable thermostat envelope."""
++        if self._is_sz2_locked():
++            return SZ2_LOCK_MAX_C
+         capability = self._setpoint_capability()
+         if (
+             self._setpoints_writable_in_ha()
+@@ -231,8 +239,15 @@
+ 
+     @property
+     def target_temperature_step(self) -> float | None:
+-        """Return the captured grid in HA's configured Fahrenheit unit."""
+-        return 1 if self._setpoints_writable_in_ha() else None
++        """Return 0.5°C in Celsius or 1°F in Fahrenheit."""
++        if not self._setpoints_writable_in_ha():
++            return None
++        return (
++            0.5
++            if self.coordinator.hass.config.units.temperature_unit
++            == UnitOfTemperature.CELSIUS
++            else 1.0
++        )
+ 
+     def _allowed_values(self, command_type: CommandType) -> tuple[str, ...]:
+         """Return profile-confirmed enum values for this device."""
+@@ -376,9 +391,43 @@
+ 
+         if heat is None and cool is None:
+             raise HomeAssistantError("No supported thermostat setpoint was provided")
++        if self._is_sz2_locked():
++            if heat is not None:
++                heat = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, heat))
++            if cool is not None:
++                cool = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, cool))
+         await self._async_execute(
+             SetThermostatSetpoints(zone=self._zone_key, heat=heat, cool=cool)
+         )
++
++    def _handle_coordinator_update(self) -> None:
++        """Enforce 18-23°C bounds on SZ2 if changed externally via wall unit or iOS app."""
++        super()._handle_coordinator_update()
++        if not self._is_sz2_locked():
++            return
++        zone = self._zone
++        if zone is None:
++            return
++        clamped_heat: float | None = None
++        clamped_cool: float | None = None
++        mode = self.hvac_mode
++        if mode in (HVACMode.HEAT, HVACMode.HEAT_COOL) and zone.heat_setpoint is not None:
++            if zone.heat_setpoint < SZ2_LOCK_MIN_C or zone.heat_setpoint > SZ2_LOCK_MAX_C:
++                clamped_heat = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.heat_setpoint))
++        if mode in (HVACMode.COOL, HVACMode.HEAT_COOL) and zone.cool_setpoint is not None:
++            if zone.cool_setpoint < SZ2_LOCK_MIN_C or zone.cool_setpoint > SZ2_LOCK_MAX_C:
++                clamped_cool = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.cool_setpoint))
++        if clamped_heat is not None or clamped_cool is not None:
++            self.hass.async_create_task(
++                self.coordinator.async_execute_command(
++                    self._device_id,
++                    SetThermostatSetpoints(
++                        zone=self._zone_key,
++                        heat=clamped_heat,
++                        cool=clamped_cool,
++                    ),
++                )
++            )
+ 
+     async def async_set_fan_mode(self, fan_mode: str) -> None:
+         """Set the thermostat fan mode."""
+diff -ruN -x __pycache__ -x *.pyc -x .DS_Store /Volumes/documents/dev/projects/aprilaire/upstream/ha-aprilaire-cloud/custom_components/aprilaire_cloud/profiles/thermostat.py /Volumes/documents/dev/projects/aprilaire/aprilaire-6000-homeassistant/custom_components/aprilaire_cloud/profiles/thermostat.py
+--- /Volumes/documents/dev/projects/aprilaire/upstream/ha-aprilaire-cloud/custom_components/aprilaire_cloud/profiles/thermostat.py	2026-11-13 20:49:05
++++ /Volumes/documents/dev/projects/aprilaire/aprilaire-6000-homeassistant/custom_components/aprilaire_cloud/profiles/thermostat.py	2026-11-14 01:45:09
+@@ -69,7 +69,22 @@
+ _CONFIRMED_8920W_MODES = ("off", "heat", "cool", "auto")
+ _CONFIRMED_8920W_FANS = ("auto", "on", "circulate")
+ _CONFIRMED_8920W_HOLDS = ("none", "temporary", "permanent", "vacation")
+-_CONFIRMED_8920W_MODELS = frozenset({"8920W", "8920W_GS"})
++_CONFIRMED_8920W_MODELS = frozenset(
++    {
++        "8920W",
++        "8920W_GS",
++        "6003",
++        "6003_GS",
++        "6002",
++        "6000",
++        "8840",
++        "8840_GS",
++        "8840M",
++        "8830",
++        "8820",
++        "8810",
++    }
++)
+ _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT = "C"
+ _CONFIRMED_8920W_DISPLAY_TEMPERATURE_UNIT = "F"
+ _CONFIRMED_8920W_HEAT_RANGE_F = (40, 90)
+@@ -376,21 +391,13 @@
+     record: DeviceRecord,
+     zones: tuple[str, ...],
+ ) -> bool:
+-    """Return whether the exposed zone has the captured Fahrenheit contract."""
+-    if (
+-        len(zones) != 1
+-        or _thermostat_model(record) not in _CONFIRMED_8920W_MODELS
+-        or _display_temperature_unit(record)
+-        != _CONFIRMED_8920W_DISPLAY_TEMPERATURE_UNIT
+-    ):
++    """Return whether the exposed zones have a valid numeric heat/cool setpoint contract."""
++    if not zones:
+         return False
+     for zone in zones:
+         settings = _authoritative_zone_settings(record, zone)
+-        _, _, status = _zone_mapping(record, zone)
+         if (
+-            _native_temperature_unit(record, settings, status)
+-            != _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT
+-            or "heat" not in settings
++            "heat" not in settings
+             or "cool" not in settings
+             or coerce_float(settings["heat"]) is None
+             or coerce_float(settings["cool"]) is None
+@@ -422,10 +429,10 @@
+     settings: dict[str, Any],
+     status: dict[str, Any],
+ ) -> str | None:
+-    """Return a native payload unit, never a display-preference fallback."""
++    """Return a native payload unit, defaulting to Celsius for AprilAire cloud thermostats."""
+     if _thermostat_model(record) in _CONFIRMED_8920W_MODELS:
+         return _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT
+-    return explicit_temperature_unit(settings, status)
++    return explicit_temperature_unit(settings, status) or _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT
+ 
+ 
+ def _display_temperature_unit(record: DeviceRecord) -> str | None:
+@@ -713,7 +720,10 @@
+         access_reason = (
+             None if record.hierarchy.access == "manage" else "account_access_read_only"
+         )
+-        model_confirmed = _thermostat_model(record) in _CONFIRMED_8920W_MODELS
++        model_confirmed = (
++            _thermostat_model(record) in _CONFIRMED_8920W_MODELS
++            or bool(zones)
++        )
+         available = False
+         reason = "command_contract_unavailable"
+         allowed: tuple[str, ...] = ()
+@@ -904,7 +914,12 @@
+             limits=_CONFIRMED_8920W_COOL_RANGE_F,
+             label="cool",
+         )
+-        if _fahrenheit_grid(cool) - _fahrenheit_grid(heat) < _CONFIRMED_8920W_DEADBAND_F:
++        if (
++            command.heat is not None
++            and command.cool is not None
++            and _fahrenheit_grid(cool) - _fahrenheit_grid(heat)
++            < _CONFIRMED_8920W_DEADBAND_F
++        ):
+             raise CommandValidationError(
+                 "heat and cool setpoints must be separated by at least 3°F"
+             )
+@@ -917,12 +932,12 @@
+         limits: tuple[int, int],
+         label: str,
+     ) -> float:
+-        """Resolve one native-C request to the whole-Fahrenheit setpoint grid."""
++        """Resolve one native-C request to a 0.5°C grid (or whole-F grid)."""
+         number = coerce_float(value)
+         if number is None:
+             raise CommandValidationError(f"{label} setpoint must be finite")
+         ThermostatProfile._validate_setpoint_range(number, limits=limits, label=label)
+-        return _wire_celsius_from_fahrenheit(_fahrenheit_grid(number))
++        return round(number * 2) / 2
+ 
+     @staticmethod
+     def _validate_setpoint_range(
+@@ -1014,8 +1029,8 @@
+         return confirmed
+ 
+     def mismatch_is_rejection(self, command: DeviceCommand) -> bool:
+-        """Use the captured settings echo only for the beta setpoint contract."""
+-        return isinstance(command, SetThermostatSetpoints)
++        """Keep mismatches inconclusive while the thermostat processes the command."""
++        return False
+ 
+     def _installed_iaq_status_requests(
+         self,
+diff -ruN -x __pycache__ -x *.pyc -x .DS_Store /Volumes/documents/dev/projects/aprilaire/upstream/ha-aprilaire-cloud/custom_components/aprilaire_cloud/switch.py /Volumes/documents/dev/projects/aprilaire/aprilaire-6000-homeassistant/custom_components/aprilaire_cloud/switch.py
+--- /Volumes/documents/dev/projects/aprilaire/upstream/ha-aprilaire-cloud/custom_components/aprilaire_cloud/switch.py	2026-11-13 20:49:05
++++ /Volumes/documents/dev/projects/aprilaire/aprilaire-6000-homeassistant/custom_components/aprilaire_cloud/switch.py	2026-11-14 01:45:21
+@@ -2,10 +2,12 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import cast
++from typing import Any, cast
+ 
+ from homeassistant.components.switch import SwitchEntity
++from homeassistant.helpers.restore_state import RestoreEntity
+ 
++from .climate import SZ2_LOCK_MAX_C, SZ2_LOCK_MIN_C
+ from .coordinator import AprilaireCloudDataUpdateCoordinator
+ from .data import AprilaireCloudConfigEntry
+ from .entity import (
+@@ -17,32 +19,114 @@
+ from .profiles import (
+     AprilaireCommandError,
+     NormalizedDehumidifierState,
++    NormalizedThermostatState,
+     SetDehumidifierPower,
++    SetThermostatSetpoints,
+     get_profile,
+ )
+ from .vendor import AprilaireCloudApiError, AprilaireCloudRateLimitError
+ 
+ 
+ async def async_setup_entry(hass, entry: AprilaireCloudConfigEntry, async_add_entities) -> None:
+-    """Set up honest on/off-only control entities."""
++    """Set up honest on/off-only control entities and Zone 2 temperature range lock."""
+     coordinator = entry.runtime_data.coordinator
++    if not hasattr(coordinator, "sz2_temp_lock_enabled"):
++        coordinator.sz2_temp_lock_enabled = True
+ 
+     def _descriptors_for_device(device_id: str, device):
+         profile = get_profile(device.profile_key)
+         if profile is None:
+             return
+-        if "dehumidifier_power" in profile.entity_descriptions(device).switch_keys:
++        desc = profile.entity_descriptions(device)
++        if "dehumidifier_power" in desc.switch_keys:
+             yield DynamicEntityDescriptor(
+                 unique_id=f"{device_id}_dehumidifier_power",
+                 factory=AprilaireDehumidifierPowerSwitch,
+                 args=(coordinator, device_id),
+             )
++        if "thermostat_sz2" in desc.climate_keys:
++            yield DynamicEntityDescriptor(
++                unique_id=f"{device_id}_sz2_temp_lock",
++                factory=AprilaireZone2TempLockSwitch,
++                args=(coordinator, device_id),
++            )
+ 
+     setup_dynamic_platform_entities(
+         entry,
+         async_add_entities,
+         _descriptors_for_device,
+     )
++
++
++class AprilaireZone2TempLockSwitch(AprilaireCloudEntity, SwitchEntity, RestoreEntity):
++    """Switch to enforce 18.0°C - 23.0°C temperature bounds on Zone 2 (SZ2 / Basement)."""
++
++    _attr_icon = "mdi:thermometer-lock"
++    _attr_name = "Basement Temp Lock (18–23°C)"
++
++    def __init__(
++        self,
++        coordinator: AprilaireCloudDataUpdateCoordinator,
++        device_id: str,
++    ) -> None:
++        """Initialize the Zone 2 temperature lock switch."""
++        super().__init__(coordinator, device_id, "sz2_temp_lock")
++
++    async def async_added_to_hass(self) -> None:
++        """Restore previous state on startup (default ON)."""
++        await super().async_added_to_hass()
++        last_state = await self.async_get_last_state()
++        if last_state is not None and last_state.state in ("on", "off"):
++            self.coordinator.sz2_temp_lock_enabled = last_state.state == "on"
++        else:
++            self.coordinator.sz2_temp_lock_enabled = True
++
++    @property
++    def is_on(self) -> bool:
++        """Return True if the 18-23°C lock is active."""
++        return bool(getattr(self.coordinator, "sz2_temp_lock_enabled", True))
++
++    @property
++    def extra_state_attributes(self) -> dict[str, Any]:
++        """Return lock range metadata."""
++        attrs = dict(super().extra_state_attributes)
++        attrs.update(
++            {
++                "min_temp_c": SZ2_LOCK_MIN_C,
++                "max_temp_c": SZ2_LOCK_MAX_C,
++                "enforced_zone": "SZ2 (Basement)",
++            }
++        )
++        return attrs
++
++    async def async_turn_on(self, **kwargs: Any) -> None:
++        """Enable the 18-23°C lock and immediately clamp SZ2 if out of bounds."""
++        self.coordinator.sz2_temp_lock_enabled = True
++        self.coordinator.async_update_listeners()
++        normalized = cast(NormalizedThermostatState | None, self.normalized_state)
++        if normalized and (zone := normalized.zones.get("SZ2")):
++            clamped_heat = None
++            clamped_cool = None
++            if zone.heat_setpoint is not None and not (
++                SZ2_LOCK_MIN_C <= zone.heat_setpoint <= SZ2_LOCK_MAX_C
++            ):
++                clamped_heat = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.heat_setpoint))
++            if zone.cool_setpoint is not None and not (
++                SZ2_LOCK_MIN_C <= zone.cool_setpoint <= SZ2_LOCK_MAX_C
++            ):
++                clamped_cool = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.cool_setpoint))
++            if clamped_heat is not None or clamped_cool is not None:
++                await self.coordinator.async_execute_command(
++                    self._device_id,
++                    SetThermostatSetpoints(
++                        zone="SZ2", heat=clamped_heat, cool=clamped_cool
++                    ),
++                )
++
++    async def async_turn_off(self, **kwargs: Any) -> None:
++        """Disable the 18-23°C lock."""
++        self.coordinator.sz2_temp_lock_enabled = False
++        self.coordinator.async_update_listeners()
+ 
+ 
+ class AprilaireDehumidifierPowerSwitch(AprilaireCloudEntity, SwitchEntity):

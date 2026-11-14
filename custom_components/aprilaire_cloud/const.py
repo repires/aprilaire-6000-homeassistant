@@ -1,0 +1,74 @@
+"""Constants for the AprilAire Cloud integration."""
+
+from __future__ import annotations
+
+from logging import Logger, getLogger
+
+from homeassistant.const import Platform
+
+LOGGER: Logger = getLogger(__package__)
+
+DOMAIN = "aprilaire_cloud"
+MANUFACTURER = "AprilAire"
+
+PLATFORMS: list[Platform] = [
+    Platform.CLIMATE,
+    Platform.HUMIDIFIER,
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.NUMBER,
+    Platform.SWITCH,
+]
+
+ACCOUNT_API = "https://account.aprilaire.io"
+DEVICE_API = "https://device.aprilaire.io"
+WEBSOCKET_URL = "wss://socket.aprilaire.io/"
+
+COGNITO_REGION = "us-west-2"
+COGNITO_USER_POOL_ID = "us-west-2_skfkpmVv6"
+COGNITO_CLIENT_ID = "3aiakr6qdoqtajv7qgtapecerg"
+
+DEHUMIDIFIER_REPORTING_TYPE = "dehumidifier"
+DEHUMIDIFIER_CONTROL_TYPE = "internal"
+DEHUMIDIFIER_SCALE = "%RH"
+
+AUTH_REFRESH_MARGIN_SECONDS = 5 * 60
+WEBSOCKET_INITIAL_SYNC_TIMEOUT = 10
+WEBSOCKET_INITIAL_IDLE_TIMEOUT = 2
+WEBSOCKET_PING_INITIAL_DELAY_SECONDS = 1
+WEBSOCKET_PING_INTERVAL_SECONDS = 290
+WEBSOCKET_PONG_TIMEOUT_SECONDS = 3
+WEBSOCKET_RECONNECT_MIN_SECONDS = 1
+WEBSOCKET_RECONNECT_MAX_SECONDS = 30
+UNKNOWN_DEVICE_MESSAGE_TTL_SECONDS = 300
+UNKNOWN_DEVICE_MESSAGE_MAX_PER_DEVICE = 20
+
+DEFAULT_SAFETY_REFRESH_MINUTES = 15
+DEFAULT_FALLBACK_REFRESH_MINUTES = 2
+MIN_SAFETY_REFRESH_MINUTES = 5
+MAX_SAFETY_REFRESH_MINUTES = 60
+MIN_FALLBACK_REFRESH_MINUTES = 1
+MAX_FALLBACK_REFRESH_MINUTES = 15
+DEFAULT_ENABLE_EXTRA_DIAGNOSTICS = False
+DEFAULT_REQUEST_TIMEOUT = 20
+MAX_RATE_LIMIT_RETRY_SECONDS = 300
+DEFAULT_RATE_LIMIT_RETRY_SECONDS = 60
+MAX_PARALLEL_REST_REQUESTS = 4
+POST_WRITE_CONFIRM_TIMEOUT = 5
+POST_WRITE_RECONCILIATION_ATTEMPTS = 2
+POST_WRITE_RECONCILIATION_DELAY_SECONDS = 1
+# A 2xx PATCH is accepted even when the vendor's settings view lags. These
+# bounded follow-up reads happen outside the Home Assistant service call.
+POST_WRITE_DEFERRED_RECONCILIATION_DELAYS_SECONDS = (2, 8)
+SHORT_WRITE_RETRY_THRESHOLD_SECONDS = 2
+
+CONF_ACCOUNT_USER_ID = "account_user_id"
+CONF_ACCOUNT_EMAIL = "account_email"
+CONF_SAFETY_REFRESH_MINUTES = "safety_refresh_minutes"
+CONF_FALLBACK_REFRESH_MINUTES = "fallback_refresh_minutes"
+CONF_ENABLE_EXTRA_DIAGNOSTICS = "enable_extra_diagnostics"
+
+ISSUE_UNSUPPORTED_DEVICES = "unsupported_devices"
+ISSUE_NO_SUPPORTED_DEVICES = "no_supported_devices"
+
+ATTRIBUTION = "Data provided by AprilAire Healthy Air"

@@ -1,0 +1,197 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect AprilAire Cloud",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect AprilAire Cloud",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Update AprilAire Cloud credentials",
+        "data": {
+          "username": "Email",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to AprilAire Cloud.",
+      "invalid_auth": "Invalid AprilAire Cloud credentials.",
+      "no_supported_devices": "No supported AprilAire devices were found. This integration currently supports aprilaire.io dehumidifiers with internal %RH control and writable humidity setpoints, plus beta/tester-ready AprilAire thermostats.",
+      "unknown": "Unexpected error.",
+      "wrong_account": "These credentials belong to a different AprilAire account."
+    },
+    "abort": {
+      "already_configured": "This AprilAire account is already configured.",
+      "reauth_successful": "Reauthentication successful.",
+      "reconfigure_successful": "Configuration updated."
+    }
+  },
+  "entity": {
+    "humidifier": {
+      "dehumidifier": {
+        "name": "Dehumidifier"
+      },
+      "attached_humidifier": {
+        "name": "Attached humidifier"
+      }
+    },
+    "switch": {
+      "dehumidifier_power": {
+        "name": "Dehumidifier power"
+      }
+    },
+    "climate": {
+      "thermostat_zone": {
+        "name": "{zone} thermostat"
+      }
+    },
+    "sensor": {
+      "current_humidity": {
+        "name": "Current humidity"
+      },
+      "current_temperature": {
+        "name": "Current temperature"
+      },
+      "filter_life": {
+        "name": "Filter life"
+      },
+      "fan_runtime": {
+        "name": "Fan runtime"
+      },
+      "wifi_signal": {
+        "name": "Wi-Fi signal"
+      },
+      "equipment_status": {
+        "name": "Equipment status"
+      },
+      "thermostat_indoor_humidity": {
+        "name": "{zone} indoor humidity"
+      },
+      "thermostat_indoor_temperature": {
+        "name": "{zone} indoor temperature"
+      },
+      "thermostat_heat_setpoint": {
+        "name": "{zone} heat setpoint"
+      },
+      "thermostat_cool_setpoint": {
+        "name": "{zone} cool setpoint"
+      },
+      "thermostat_outdoor_temperature": {
+        "name": "{zone} outdoor temperature"
+      },
+      "thermostat_outdoor_humidity": {
+        "name": "{zone} outdoor humidity"
+      },
+      "thermostat_equipment_status": {
+        "name": "{zone} equipment status"
+      },
+      "thermostat_hvac_service_remaining": {
+        "name": "{zone} HVAC service remaining"
+      },
+      "iaq_humidifier_status": {
+        "name": "Humidifier status"
+      },
+      "iaq_humidifier_service_remaining": {
+        "name": "Humidifier service remaining"
+      },
+      "iaq_dehumidifier_status": {
+        "name": "Dehumidifier status"
+      },
+      "iaq_dehumidifier_service_remaining": {
+        "name": "Dehumidifier service remaining"
+      },
+      "iaq_freshair_status": {
+        "name": "Fresh air status"
+      },
+      "iaq_freshair_service_remaining": {
+        "name": "Fresh air service remaining"
+      },
+      "iaq_aircleaning_status": {
+        "name": "Air cleaning status"
+      },
+      "iaq_aircleaning_service_remaining": {
+        "name": "Air cleaning service remaining"
+      },
+      "attached_humidifier_water_panel_remaining": {
+        "name": "Water panel remaining"
+      }
+    },
+    "binary_sensor": {
+      "filter_service": {
+        "name": "Filter service"
+      },
+      "alert_high_humidity": {
+        "name": "High humidity alert"
+      },
+      "alert_low_humidity": {
+        "name": "Low humidity alert"
+      },
+      "alert_high_temperature": {
+        "name": "High temperature alert"
+      },
+      "alert_low_temperature": {
+        "name": "Low temperature alert"
+      },
+      "compressor": {
+        "name": "Compressor"
+      },
+      "dehumidifier_fan": {
+        "name": "Dehumidifier fan"
+      },
+      "hvac_fan": {
+        "name": "HVAC fan"
+      },
+      "websocket_connection": {
+        "name": "Cloud connection"
+      },
+      "attached_humidifier_water_panel_service": {
+        "name": "Water panel service"
+      }
+    },
+    "number": {
+      "alert_limit_high_humidity": {
+        "name": "High humidity threshold"
+      }
+    }
+  },
+  "exceptions": {
+    "rate_limited": {
+      "message": "AprilAire Cloud is throttling requests. Retry in {seconds} seconds."
+    },
+    "write_failed": {
+      "message": "The requested AprilAire change could not be applied."
+    }
+  },
+  "issues": {
+    "no_supported_devices": {
+      "title": "No supported AprilAire devices are available yet",
+      "description": "This AprilAire account currently has {unsupported_count} discovered device(s), but none match the supported AprilAire Cloud dehumidifier or beta thermostat profiles so no entities were added.\n\nReasons: {reason_summary}\n\nIf a device is still finishing setup in the AprilAire Healthy Air app, keep the integration installed and it will retry automatically."
+    },
+    "unsupported_devices": {
+      "title": "Some AprilAire devices were skipped",
+      "description": "This AprilAire account has {supported_count} supported device(s) and {unsupported_count} unsupported device(s). Unsupported devices were not added to Home Assistant.\n\nReasons: {reason_summary}"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "AprilAire Cloud options",
+        "data": {
+          "safety_refresh_minutes": "Safety refresh interval (minutes)",
+          "fallback_refresh_minutes": "Fallback refresh interval (minutes)",
+          "enable_extra_diagnostics": "Enable extra diagnostic entities by default"
+        }
+      }
+    }
+  }
+}
