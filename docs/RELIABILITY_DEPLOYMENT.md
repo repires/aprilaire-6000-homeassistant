@@ -48,3 +48,28 @@ Source commit [`b7840a4`](https://github.com/repires/aprilaire-6000-homeassistan
 - [Cloud #16](https://github.com/billda/ha-aprilaire-cloud/pull/16): independent coordinator shutdown and WebSocket ping-failure fixes, with regression tests.
 
 These contributions are submitted for upstream review, not merged. No HA core dependency bump was submitted because the required library release is still a candidate.
+
+## Upstream review follow-up (local 1.3.0, 2026-11-16)
+
+The maintainer's review of [pyaprilaire #126](https://github.com/chamberlain2007/pyaprilaire/pull/126#pullrequestreview-5924028348) asked for four changes: `_and_wait` variants, a note that SETUP 10 is undocumented, a comment explaining the pacing, and a Heat Blast COS subscription. All four were made upstream. The PR branch was also rebased onto develop after [#127](https://github.com/chamberlain2007/pyaprilaire/pull/127). The full library suite passes (589 tests), as do ruff check and ruff format.
+
+[HA core #186563](https://github.com/home-assistant/core/pull/186563) is the maintainer's draft bump to pyaprilaire 0.10. It zero-pads MAC addresses and migrates config entries to the padded form. Its Copilot findings about MACs regrouped by `format_mac` are fixed in the current head. An exhaustive offline check over 262,144 legacy MAC shapes found no mismatches.
+
+This component gets the same changes where they apply:
+
+- **Heat Blast COS.** The component writes its own subscription mask. The mask matches 0.9.1's, except that Heat Blast is on. The switch now updates when the thermostat changes, not only on the five-minute poll.
+- **Pacing.** The intervals are named constants with the 6003 evidence explained. An unidentified model is paced, as it is upstream.
+- **Heat Blast writes.** Each write is confirmed by reading the state back. When the write is not applied or the thermostat is disconnected, the switch raises `HomeAssistantError` instead of returning silently.
+- **MAC identity.** Setup compares MACs in zero-padded form. An entry already migrated by core's 0.10 bump therefore still sets up under this component. Stored IDs are not rewritten.
+
+**Verification:** 57 offline tests pass, including 14 new regression tests. Ruff check and ruff format pass.
+
+**Deployment:**
+
+- A fresh backup is at `~/.hermes/backups/home-assistant/aprilaire-upstream-review-20261116T233933Z` (43 files).
+- The live files matched the previous release manifest, so no drift was overwritten.
+- Five files were installed and checked by read-back hash.
+- After the HA core restart, both entries loaded on 2026.11.1. All 31 entities were available, with no changes to compared controls. The range lock restored to on without error, the Heat Blast switch was present, and the system log had no AprilAire entries.
+- Heat Blast was not toggled on the live system.
+
+**Rollback:** restore `aprilaire/{__init__,coordinator,protocol}.py` and `aprilaire/manifest.json` from that backup, then restart HA core.
