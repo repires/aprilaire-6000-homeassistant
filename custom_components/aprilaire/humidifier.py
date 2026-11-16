@@ -4,8 +4,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast, override
 
-from pyaprilaire.const import Attribute
-
 from homeassistant.components.humidifier import (
     HumidifierAction,
     HumidifierDeviceClass,
@@ -15,6 +13,7 @@ from homeassistant.components.humidifier import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
+from pyaprilaire.const import Attribute
 
 from .coordinator import AprilaireConfigEntry, AprilaireCoordinator
 from .entity import BaseAprilaireEntity

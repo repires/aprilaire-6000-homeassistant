@@ -136,9 +136,10 @@ class AprilaireCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await client.async_authenticate()
         user = await client.async_get_user()
         hierarchy = await client.async_get_hierarchy()
-        summary, classification_complete = await self._async_get_supported_device_summary(
-            client, hierarchy
-        )
+        (
+            summary,
+            classification_complete,
+        ) = await self._async_get_supported_device_summary(client, hierarchy)
         if summary.total_devices == 0 or (
             classification_complete and summary.supported_devices == 0
         ):
@@ -264,9 +265,7 @@ class AprilaireCloudConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             summary.unsupported_devices,
             summary.pending_classification_devices,
         )
-        classification_complete = (
-            websocket_complete and summary.pending_classification_devices == 0
-        )
+        classification_complete = websocket_complete and summary.pending_classification_devices == 0
         return summary, classification_complete
 
 
@@ -286,12 +285,20 @@ class AprilaireCloudOptionsFlow(config_entries.OptionsFlowWithReload):
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
         """Manage integration options."""
+        errors = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            if (
+                user_input["range_max_c"] - user_input["range_min_c"] >= 2
+                and user_input["range_min_c"] * 2 == round(user_input["range_min_c"] * 2)
+                and user_input["range_max_c"] * 2 == round(user_input["range_max_c"] * 2)
+            ):
+                return self.async_create_entry(title="", data=user_input)
+            errors["base"] = "invalid_range"
 
         options = self._config_entry.options
         return self.async_show_form(
             step_id="init",
+            errors=errors,
             data_schema=vol.Schema(
                 {
                     vol.Required(
@@ -319,6 +326,12 @@ class AprilaireCloudOptionsFlow(config_entries.OptionsFlowWithReload):
                             min=MIN_FALLBACK_REFRESH_MINUTES,
                             max=MAX_FALLBACK_REFRESH_MINUTES,
                         ),
+                    ),
+                    vol.Required("range_min_c", default=options.get("range_min_c", 18.0)): vol.All(
+                        vol.Coerce(float), vol.Range(min=10, max=30)
+                    ),
+                    vol.Required("range_max_c", default=options.get("range_max_c", 23.0)): vol.All(
+                        vol.Coerce(float), vol.Range(min=12, max=32)
                     ),
                     vol.Required(
                         CONF_ENABLE_EXTRA_DIAGNOSTICS,

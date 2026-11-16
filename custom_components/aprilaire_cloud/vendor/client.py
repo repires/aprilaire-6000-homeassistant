@@ -156,9 +156,7 @@ class AprilaireCloudApiClient:
 
     async def async_get_user(self) -> dict[str, Any]:
         """Fetch the authenticated user profile."""
-        return await self._async_request_json(
-            "GET", f"{ACCOUNT_API}/user", route_template="/user"
-        )
+        return await self._async_request_json("GET", f"{ACCOUNT_API}/user", route_template="/user")
 
     async def async_get_hierarchy(self) -> dict[str, Any]:
         """Fetch the full hierarchy."""
@@ -206,9 +204,7 @@ class AprilaireCloudApiClient:
             )
         except AprilaireCloudRateLimitError as err:
             if err.retry_after <= SHORT_WRITE_RETRY_THRESHOLD_SECONDS:
-                LOGGER.debug(
-                    "Short rate limit on write (%.1fs), auto-retrying", err.retry_after
-                )
+                LOGGER.debug("Short rate limit on write (%.1fs), auto-retrying", err.retry_after)
                 await asyncio.sleep(err.retry_after)
                 return await self._async_request_json(
                     "PATCH",
@@ -283,8 +279,7 @@ class AprilaireCloudApiClient:
             if not allow_retry:
                 raise AprilaireCloudAuthenticationTransientError(
                     "http_session_rejected",
-                    operation=self._auth.metadata.last_operation
-                    or AuthOperation.REFRESH,
+                    operation=self._auth.metadata.last_operation or AuthOperation.REFRESH,
                 )
             await self.async_get_id_token(force_refresh=True)
             return await self._async_request_json(

@@ -1,6 +1,8 @@
-# AprilAire 6003 (6000-Series Zone Control) — Complete Protocol & Hardware Reference
+# AprilAire 6003 (6000-Series Zone Control) — Observed Protocol & Hardware Reference
 
-Last updated: 2026-11-13  
+Last updated: 2026-11-15
+
+> Historical observations from one 6003 installation. Unsupported request formats do not prove that every firmware or interface lacks local zoning. Read/write support and inferred installer-field meanings need separate verification. The included sample is synthetic and is not an original wire capture. See [implementation review](IMPLEMENTATION_REVIEW_2026-11-15.md) and the current README for supported behavior.
 Target Device: `192.0.2.45:7000` (`MAC: B4:82:55:XX:XX:XX`, Home Assistant Config Entry: `<APRILAIRE_CONFIG_ENTRY_ID>`)
 
 ---
@@ -73,7 +75,7 @@ Captured in `aprilaire_probe.json` and `aprilaire_probe2.json`:
 | `(8, 1)` | Revision & Model | `[66, 2, 2, 2, 28, 4, 14]` | `hw_rev = 66 ('B')`, `fw = 2.2`, `proto_rev = 2`, **`model_number = 28 ('6003')`**, `gainspan_fw = 4.14` |
 | `(8, 2)` | MAC & Extended ID (v2) | `[180, 130, 85, 0, 0, 1, 1, 66, 2, 2, 2, 28, 4, 14]` | `MAC = B4:82:55:XX:XX:XX`, `force_connection = 1`, followed by the 7 bytes of `(8, 1)`! (`pyaprilaire` previously truncated bytes `7..13` and misparsed byte `7` (`66`) as `connection_type`!) |
 | `(8, 3)` | — | `NACK 0x07` | Unknown attribute |
-| `(8, 4)` | Location & Name | `84 51 77 51 66 53 00 00 87 104 111 108 101 32 72 111 109 101 00...` | `location = "T3M3B5"` (bytes `0..7`), **`name = "Whole Home"`** (bytes `8..23`). |
+| `(8, 4)` | Location & Name | `84 69 83 84 48 48 48 00 87 104 111 108 101 32 72 111 109 101 00...` | `location = "TEST000"` (bytes `0..7`), **`name = "Whole Home"`** (bytes `8..23`). |
 | `(8, 5)` | Name (8800-only) | `NACK 0x07` | Unknown attribute on 6003 (`pyaprilaire` calls `(8, 5)` instead of `(8, 4)`, causing missing name and `ERROR: Received NACK for attribute 7` in HA!). |
 | `(8, 10)` | — | `NACK 0x0A` | Unsupported model |
 
@@ -81,7 +83,7 @@ Captured in `aprilaire_probe.json` and `aprilaire_probe2.json`:
 | `(Dom, Attr)` | Name | Raw Data Bytes (`body[3:]`) | Decoded Meaning on User's 6003 |
 | :--- | :--- | :--- | :--- |
 | `(1, 1)` | Thermostat Installer Settings | `[1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 4, 5, 1, 1, 0, 0, 0, 0, 5, 2, 2, 4, 0, 0, 0, 0, 1, 1, 0, 2, 1, 61, 81, 1, 12, 0, 1, 0, 0, 0, 0, 13, 13, 0]` (44 bytes) | `temp_scale = 1` (Celsius), `control_setup = 0` (Heat & Cool), `auto_changeover = 1`, `deadband = 1`, `outdoor_sensor_installed = 0` (wired to Hub), `away_available = 1`, `heat_blast_available = 1`, `progressive_recovery = 1`, `program_format = 1` |
-| `(1, 2)` | Contractor Info | `67 97 110 ...` (212 bytes) | `"Canyon plumbing"`, Phone `"4032581505"` |
+| `(1, 2)` | Contractor Info | `67 97 110 ...` (212 bytes) | `"Synthetic HVAC"` (contact details removed) |
 | `(1, 3)` | Air Cleaning Setup | `[1]` | Not installed |
 | `(1, 4)` | Humidity Control Setup | `[1, 41, 20, 13, 5, 11, 26]` | Manual Humidifier installed (`500 Whole-House Humidifier`) |
 | `(1, 5)` | Fresh Air Setup (Basic) | `[0, 0, 13]` | Fresh Air Ventilation installed |

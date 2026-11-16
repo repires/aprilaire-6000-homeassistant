@@ -26,7 +26,11 @@ from .entity import (
     setup_dynamic_platform_entities,
 )
 from .models import SocketState
-from .profiles import NormalizedDehumidifierState, NormalizedThermostatState, get_profile
+from .profiles import (
+    NormalizedDehumidifierState,
+    NormalizedThermostatState,
+    get_profile,
+)
 
 _WEBSOCKET_CONNECTION_SUFFIX = "_websocket_connection"
 
@@ -100,9 +104,7 @@ DEHUMIDIFIER_BINARY_SENSORS: dict[str, AprilaireBinarySensorDescription] = {
         enabled_default=False,
     ),
 }
-PROFILE_BINARY_SENSOR_DESCRIPTIONS: dict[
-    str, dict[str, AprilaireBinarySensorDescription]
-] = {
+PROFILE_BINARY_SENSOR_DESCRIPTIONS: dict[str, dict[str, AprilaireBinarySensorDescription]] = {
     "dehumidifier": DEHUMIDIFIER_BINARY_SENSORS,
 }
 
@@ -171,34 +173,25 @@ def _remove_legacy_websocket_devices(
     """Remove obsolete synthetic devices without deleting their diagnostic entities."""
     device_registry = dr.async_get(coordinator.hass)
     entity_registry = er.async_get(coordinator.hass)
-    physical_identifiers = {
-        (DOMAIN, device_id) for device_id in coordinator.data.devices
-    }
+    physical_identifiers = {(DOMAIN, device_id) for device_id in coordinator.data.devices}
     location_identifiers = {
-        (DOMAIN, f"location_{location_id}")
-        for location_id in coordinator.data.locations
+        (DOMAIN, f"location_{location_id}") for location_id in coordinator.data.locations
     }
     legacy_device_ids = {
         device.id
-        for device in dr.async_entries_for_config_entry(
-            device_registry, entry.entry_id
-        )
+        for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id)
         if device.identifiers.isdisjoint(physical_identifiers)
         and not device.identifiers.isdisjoint(location_identifiers)
     }
 
-    for registry_entry in er.async_entries_for_config_entry(
-        entity_registry, entry.entry_id
-    ):
+    for registry_entry in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
         if (
             registry_entry.platform != DOMAIN
             or registry_entry.device_id is None
             or not registry_entry.unique_id.endswith(_WEBSOCKET_CONNECTION_SUFFIX)
         ):
             continue
-        location_id = registry_entry.unique_id.removesuffix(
-            _WEBSOCKET_CONNECTION_SUFFIX
-        )
+        location_id = registry_entry.unique_id.removesuffix(_WEBSOCKET_CONNECTION_SUFFIX)
         device = device_registry.async_get(registry_entry.device_id)
         if (
             device is not None
@@ -234,9 +227,7 @@ async def async_setup_entry(hass, entry: AprilaireCloudConfigEntry, async_add_en
     setup_dynamic_platform_entities(
         entry,
         async_add_entities,
-        lambda device_id, device: _descriptors_for_device(
-            coordinator, device_id, device
-        ),
+        lambda device_id, device: _descriptors_for_device(coordinator, device_id, device),
     )
     _setup_websocket_status_entities(coordinator, entry, async_add_entities)
 

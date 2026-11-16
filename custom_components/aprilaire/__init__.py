@@ -1,11 +1,10 @@
 """The Aprilaire integration (Enhanced for 6000-Series / Model 6003)."""
 
-from pyaprilaire.const import Attribute
-
 from homeassistant.const import CONF_HOST, CONF_PORT, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.device_registry import format_mac
+from pyaprilaire.const import Attribute
 
 from .coordinator import AprilaireConfigEntry, AprilaireCoordinator
 
@@ -25,6 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AprilaireConfigEntry) ->
     port = entry.data[CONF_PORT]
 
     coordinator = AprilaireCoordinator(hass, entry, host, port)
+    entry.async_on_unload(coordinator.async_stop)
     await coordinator.start_listen()
 
     async def ready_callback(ready: bool) -> None:
@@ -35,7 +35,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: AprilaireConfigEntry) ->
                 raise ConfigEntryAuthFailed("Invalid MAC address")
 
             entry.runtime_data = coordinator
-            entry.async_on_unload(coordinator.stop_listen)
 
             await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -50,7 +49,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: AprilaireConfigEntry) ->
 
             raise ConfigEntryNotReady("Failed to wait for ready")
 
-    await coordinator.wait_for_ready(ready_callback)
+    try:
+        await coordinator.wait_for_ready(ready_callback)
+    except BaseException:
+        await coordinator.async_stop()
+        raise
     return True
 
 

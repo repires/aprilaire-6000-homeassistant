@@ -159,8 +159,7 @@ def settings_match_payload(settings: dict[str, Any], payload: dict[str, Any]) ->
 def settings_cover_payload(settings: dict[str, Any], payload: dict[str, Any]) -> bool:
     """Return whether an observation includes every requested settings leaf."""
     return all(
-        get_nested_value(settings, path) is not _MISSING
-        for path, _ in iter_leaf_paths(payload)
+        get_nested_value(settings, path) is not _MISSING for path, _ in iter_leaf_paths(payload)
     )
 
 

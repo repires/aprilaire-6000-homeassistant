@@ -188,9 +188,7 @@ class AprilaireAttachedHumidifierEntity(AprilaireCloudEntity, HumidifierEntity):
         device = coordinator.data.devices.get(device_id)
         profile = get_profile(device.profile_key) if device is not None else None
         capability = (
-            profile.capabilities(device).commands.get(
-                CommandType.ATTACHED_HUMIDIFIER_TARGET
-            )
+            profile.capabilities(device).commands.get(CommandType.ATTACHED_HUMIDIFIER_TARGET)
             if profile is not None and device is not None
             else None
         )

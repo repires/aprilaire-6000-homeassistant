@@ -2,8 +2,6 @@
 
 from typing import Any, override
 
-from pyaprilaire.const import Attribute
-
 from homeassistant.components.climate import (
     ATTR_TARGET_TEMP_HIGH,
     ATTR_TARGET_TEMP_LOW,
@@ -24,6 +22,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from pyaprilaire.const import Attribute
 
 from .const import (
     FAN_CIRCULATE,
@@ -72,9 +71,7 @@ async def async_setup_entry(
 ) -> None:
     """Add climates for passed config_entry in HA."""
 
-    async_add_entities(
-        [AprilaireClimate(config_entry.runtime_data, config_entry.unique_id)]
-    )
+    async_add_entities([AprilaireClimate(config_entry.runtime_data, config_entry.unique_id)])
 
 
 class AprilaireClimate(BaseAprilaireEntity, ClimateEntity):
@@ -118,9 +115,7 @@ class AprilaireClimate(BaseAprilaireEntity, ClimateEntity):
     @override
     def current_humidity(self) -> int | None:
         """Get current humidity."""
-        return self.coordinator.data.get(
-            Attribute.INDOOR_HUMIDITY_CONTROLLING_SENSOR_VALUE
-        )
+        return self.coordinator.data.get(Attribute.INDOOR_HUMIDITY_CONTROLLING_SENSOR_VALUE)
 
     @property
     @override
@@ -174,34 +169,32 @@ class AprilaireClimate(BaseAprilaireEntity, ClimateEntity):
 
     @property
     @override
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Get current temperature."""
-        return self.coordinator.data.get(
-            Attribute.INDOOR_TEMPERATURE_CONTROLLING_SENSOR_VALUE
-        )
+        return self.coordinator.data.get(Attribute.INDOOR_TEMPERATURE_CONTROLLING_SENSOR_VALUE)
 
     @property
     @override
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Get the target temperature."""
         hvac_mode = self.hvac_mode
 
         if hvac_mode == HVACMode.COOL:
-            return self.target_temperature_high
+            return self.native_target_temperature_high
         if hvac_mode == HVACMode.HEAT:
-            return self.target_temperature_low
+            return self.native_target_temperature_low
 
         return None
 
     @property
     @override
-    def target_temperature_high(self) -> float | None:
+    def native_target_temperature_high(self) -> float | None:
         """Get cool setpoint."""
         return self.coordinator.data.get(Attribute.COOL_SETPOINT)
 
     @property
     @override
-    def target_temperature_low(self) -> float | None:
+    def native_target_temperature_low(self) -> float | None:
         """Get heat setpoint."""
         return self.coordinator.data.get(Attribute.HEAT_SETPOINT)
 

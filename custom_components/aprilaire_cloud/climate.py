@@ -160,7 +160,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
         return super().available and self._zone is not None
 
     @property
-    def temperature_unit(self) -> str:
+    def native_temperature_unit(self) -> str:
         """Return the thermostat temperature unit."""
         zone = self._zone
         return _ha_temperature_unit(
@@ -205,15 +205,13 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
 
     def _is_sz2_locked(self) -> bool:
         """Return True if this is Zone 2 (SZ2) and the 18-23°C lock is active."""
-        return self._zone_key == "SZ2" and getattr(
-            self.coordinator, "sz2_temp_lock_enabled", True
-        )
+        return self.coordinator.range_locks.enabled(self._device_id, self._zone_key)
 
     @property
     def min_temp(self) -> float:
         """Return the lower bound of the writable thermostat envelope."""
         if self._is_sz2_locked():
-            return SZ2_LOCK_MIN_C
+            return self.coordinator.range_locks.minimum
         capability = self._setpoint_capability()
         if (
             self._setpoints_writable_in_ha()
@@ -227,7 +225,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
     def max_temp(self) -> float:
         """Return the upper bound of the writable thermostat envelope."""
         if self._is_sz2_locked():
-            return SZ2_LOCK_MAX_C
+            return self.coordinator.range_locks.maximum
         capability = self._setpoint_capability()
         if (
             self._setpoints_writable_in_ha()
@@ -244,8 +242,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
             return None
         return (
             0.5
-            if self.coordinator.hass.config.units.temperature_unit
-            == UnitOfTemperature.CELSIUS
+            if self.coordinator.hass.config.units.temperature_unit == UnitOfTemperature.CELSIUS
             else 1.0
         )
 
@@ -284,7 +281,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
         return list(values) or None
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return the current indoor temperature."""
         zone = self._zone
         if zone is None or zone.temperature_unit is None:
@@ -314,7 +311,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
         return HA_ACTION_BY_STATUS.get(zone.operating_state)
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the single setpoint for heat or cool modes."""
         zone = self._zone
         if zone is None or zone.temperature_unit is None:
@@ -326,7 +323,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
         return None
 
     @property
-    def target_temperature_low(self) -> float | None:
+    def native_target_temperature_low(self) -> float | None:
         """Return the heat setpoint."""
         zone = self._zone
         if zone is None or zone.temperature_unit is None:
@@ -334,7 +331,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
         return zone.heat_setpoint
 
     @property
-    def target_temperature_high(self) -> float | None:
+    def native_target_temperature_high(self) -> float | None:
         """Return the cool setpoint."""
         zone = self._zone
         if zone is None or zone.temperature_unit is None:
@@ -393,41 +390,16 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
             raise HomeAssistantError("No supported thermostat setpoint was provided")
         if self._is_sz2_locked():
             if heat is not None:
-                heat = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, heat))
-            if cool is not None:
-                cool = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, cool))
-        await self._async_execute(
-            SetThermostatSetpoints(zone=self._zone_key, heat=heat, cool=cool)
-        )
-
-    def _handle_coordinator_update(self) -> None:
-        """Enforce 18-23°C bounds on SZ2 if changed externally via wall unit or iOS app."""
-        super()._handle_coordinator_update()
-        if not self._is_sz2_locked():
-            return
-        zone = self._zone
-        if zone is None:
-            return
-        clamped_heat: float | None = None
-        clamped_cool: float | None = None
-        mode = self.hvac_mode
-        if mode in (HVACMode.HEAT, HVACMode.HEAT_COOL) and zone.heat_setpoint is not None:
-            if zone.heat_setpoint < SZ2_LOCK_MIN_C or zone.heat_setpoint > SZ2_LOCK_MAX_C:
-                clamped_heat = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.heat_setpoint))
-        if mode in (HVACMode.COOL, HVACMode.HEAT_COOL) and zone.cool_setpoint is not None:
-            if zone.cool_setpoint < SZ2_LOCK_MIN_C or zone.cool_setpoint > SZ2_LOCK_MAX_C:
-                clamped_cool = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.cool_setpoint))
-        if clamped_heat is not None or clamped_cool is not None:
-            self.hass.async_create_task(
-                self.coordinator.async_execute_command(
-                    self._device_id,
-                    SetThermostatSetpoints(
-                        zone=self._zone_key,
-                        heat=clamped_heat,
-                        cool=clamped_cool,
-                    ),
+                heat = max(
+                    self.coordinator.range_locks.minimum,
+                    min(self.coordinator.range_locks.maximum, heat),
                 )
-            )
+            if cool is not None:
+                cool = max(
+                    self.coordinator.range_locks.minimum,
+                    min(self.coordinator.range_locks.maximum, cool),
+                )
+        await self._async_execute(SetThermostatSetpoints(zone=self._zone_key, heat=heat, cool=cool))
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set the thermostat fan mode."""
@@ -438,9 +410,7 @@ class AprilaireThermostatClimateEntity(AprilaireCloudEntity, ClimateEntity):
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         """Set the thermostat hold mode."""
         if preset_mode not in PRESET_MODES:
-            raise HomeAssistantError(
-                f"Unsupported AprilAire thermostat preset mode: {preset_mode}"
-            )
+            raise HomeAssistantError(f"Unsupported AprilAire thermostat preset mode: {preset_mode}")
         await self._async_execute(SetThermostatHold(zone=self._zone_key, hold=preset_mode))
 
     async def _async_execute(self, command: DeviceCommand) -> None:
