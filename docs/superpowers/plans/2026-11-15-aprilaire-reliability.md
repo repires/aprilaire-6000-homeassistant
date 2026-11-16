@@ -33,4 +33,4 @@
 
 - Tasks 1–4: complete. Offline regressions, implementation, independent review and fixture/packaging updates are verified; 43 tests pass.
 - Task 5: complete. Both components backed up, 43 deployed files hash-verified, HA restarted, both entries reloaded; 31 entities available and compared controls unchanged.
-- Task 6: upstream PR #126 and #13 updated; independent cloud PR #16 opened. Repository commit/push and remote verification follow. See `docs/RELIABILITY_DEPLOYMENT.md` for exact evidence and limitations.
+- Task 6: complete. Source commit `b7840a470c2850d717fbeb93759707c80d81dfb8` pushed and remote SHA verified; repository PR #1 opened and its Test workflow passed. Upstream PR #126 and #13 updated; independent cloud PR #16 opened. See `docs/RELIABILITY_DEPLOYMENT.md` for exact evidence and limitations.

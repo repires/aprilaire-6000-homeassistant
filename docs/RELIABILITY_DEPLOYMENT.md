@@ -13,7 +13,7 @@ The findings in [the review](IMPLEMENTATION_REVIEW_2026-11-15.md) were investiga
 
 The worktree's **43 offline tests pass** on Python 3.14.9 with HA 2026.11.1. Internet/LAN sockets are disabled during tests. Ruff check, Ruff format check, AST/JSON validation and git whitespace checks pass. One warning originates in HA's aiohttp application class. An independent reviewer identified corrupted-length recovery, unrepresentable range bounds and malformed unit evidence; all have fixes and regression tests.
 
-The local library contribution passes **301 packet/client/constants/socket tests**. A full-library attempt reached 546 passing tests before hanging and being interrupted; its remaining interactive/session tests are not certified.
+The local library contribution passes **301 packet/client/constants/socket tests**. A baseline full-library attempt reached 546 passing tests before hanging and being interrupted; its remaining interactive/session tests are not certified.
 
 The cloud contract contribution passes **216 tests**, with **95.04%** statement coverage. The independent shutdown/ping contribution passes **203 tests**, with **95.02%** coverage. Both exceed upstream's 95.01% gate. These runs used the available Python 3.14 environment. Full-package mypy encounters six existing config-flow schema annotation incompatibilities against newer HA typing. A local attempt to provision the upstream Python 3.13 environment could not build its pinned lru-dict dependency because no C compiler is installed; upstream CI remains the check for that exact environment.
 
@@ -36,6 +36,10 @@ After restarting HA core to remove the previous process-wide patches, and again 
 Live verification used telemetry and entry reloads. It did not deliberately change thermostat targets, fan mode, Heat Blast, humidity or schedules. Hardware behavior for other firmware/models and SZ3 writes remains unverified.
 
 Rollback: restore the backed-up component files through the existing authenticated File editor, remove the newly introduced `aprilaire/protocol.py` and `aprilaire_cloud/range_lock.py` if reverting completely, then restart HA core. No HA configuration or registry migration is required.
+
+## Repository publication
+
+Source commit [`b7840a4`](https://github.com/repires/aprilaire-6000-homeassistant/commit/b7840a470c2850d717fbeb93759707c80d81dfb8) was pushed to `repires/aprilaire-review` and its remote SHA verified. [Repository PR #1](https://github.com/repires/aprilaire-6000-homeassistant/pull/1) is open. The [Test workflow](https://github.com/repires/aprilaire-6000-homeassistant/actions/runs/43803691588) passed installation, all 43 offline tests, Ruff check and format check on GitHub Actions. The code/JSON deployment hashes match this source commit.
 
 ## Upstream contributions
 
