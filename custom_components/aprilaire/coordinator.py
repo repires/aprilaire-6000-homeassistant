@@ -10,7 +10,7 @@ from typing import Any, override
 
 import pyaprilaire.client
 from pyaprilaire.const import MODELS as UPSTREAM_MODELS, Action, Attribute, FunctionalDomain
-from pyaprilaire.packet import MAPPING, Packet, ValueType
+from pyaprilaire.packet import MAPPING, NackPacket, Packet, ValueType
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -95,9 +95,128 @@ async def _read_thermostat_name_v2(self: Any) -> None:
     )
 
 
+def _patched_packet_parse(cls: Any, data: bytes) -> Any:
+    """Patch upstream Packet.parse to fix 16-bit length bitwise shift and MAC hex formatting."""
+    data_index = 0
+
+    while data_index < len(data):
+        if data_index + 4 > len(data):
+            break
+        revision = data[data_index]
+        sequence = data[data_index + 1]
+        count = (data[data_index + 2] << 8) | data[data_index + 3]
+
+        if data_index + count + 5 > len(data):
+            break
+
+        action = int(data[data_index + 4])
+        functional_domain = int(data[data_index + 5])
+        attribute = int(data[data_index + 6])
+
+        try:
+            action = Action(action)
+            functional_domain = FunctionalDomain(functional_domain)
+        except Exception:
+            data_index += count + 5
+            continue
+
+        if action == Action.NACK:
+            nack_attribute = int(data[data_index + 5])
+            yield NackPacket(nack_attribute)
+            data_index += count + 5
+            continue
+
+        if (
+            action not in MAPPING
+            or functional_domain not in MAPPING[action]
+            or attribute not in MAPPING[action][functional_domain]
+        ):
+            data_index += count + 5
+            continue
+
+        packet = Packet(
+            action, functional_domain, attribute, revision, sequence, count
+        )
+
+        final_index = data_index + count + 3
+        payload_start_index = data_index
+        data_index += 7
+        attribute_index = 0
+
+        while data_index <= final_index:
+            if attribute_index >= len(
+                MAPPING[action][functional_domain][attribute]
+            ):
+                data_index += 1
+            else:
+                attribute_info = MAPPING[action][functional_domain][attribute][
+                    attribute_index
+                ]
+
+                attribute_name, value_type = attribute_info[0], attribute_info[1]
+                extra_attribute_info = attribute_info[2:]
+
+                if attribute_name is None or value_type is None:
+                    data_index += 1
+                    attribute_index += 1
+                    continue
+
+                data_value = data[data_index]
+
+                if value_type == ValueType.INTEGER:
+                    packet.data[attribute_name] = data_value
+                    data_index += 1
+                elif value_type == ValueType.INTEGER_REQUIRED:
+                    if data_value is not None and data_value != 0:
+                        packet.data[attribute_name] = data_value
+                    data_index += 1
+                elif value_type == ValueType.HUMIDITY:
+                    packet.data[attribute_name] = cls._decode_humidity(data_value)
+                    data_index += 1
+                elif value_type == ValueType.TEMPERATURE:
+                    packet.data[attribute_name] = cls._decode_temperature(data_value)
+                    data_index += 1
+                elif value_type == ValueType.TEMPERATURE_REQUIRED:
+                    if data_value is not None and data_value != 0:
+                        packet.data[attribute_name] = cls._decode_temperature(data_value)
+                    data_index += 1
+                elif value_type == ValueType.MAC_ADDRESS:
+                    mac_address_components = []
+                    for _ in range(0, 6):
+                        mac_address_components.append(f"{data[data_index]:02x}")
+                        data_index += 1
+                    packet.data[attribute_name] = ":".join(mac_address_components)
+                elif value_type == ValueType.TEXT:
+                    text_length = extra_attribute_info[0]
+                    text = ""
+                    for _ in range(0, text_length):
+                        current_value = " " if data[data_index] == 0 else chr(data[data_index])
+                        text += current_value
+                        data_index += 1
+                    data_index += 1
+                    packet.data[attribute_name] = text.strip(" ")
+
+                attribute_index += 1
+
+        crc = data[data_index]
+        if Packet._verify_crc(data[payload_start_index:data_index], crc):
+            yield packet
+
+        data_index += 1
+
+
+Packet.parse = classmethod(_patched_packet_parse)
+
+
+async def _noop_update_status(self: Any) -> None:
+    """Disable upstream pyaprilaire _update_status to prevent burst flood & socket disconnect on 6003."""
+    pass
+
+
 # Patch upstream _AprilaireClientProtocol so bursts are paced on the RS-485 UART
 pyaprilaire.client._AprilaireClientProtocol._queue_loop = _paced_queue_loop
 pyaprilaire.client._AprilaireClientProtocol.read_thermostat_name = _read_thermostat_name_v2
+pyaprilaire.client._AprilaireClientProtocol._update_status = _noop_update_status
 
 AprilaireConfigEntry = ConfigEntry["AprilaireCoordinator"]
 
@@ -135,7 +254,26 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
         )
 
         if hasattr(self.client, "data") and self.client.data:
-            self.data = self.client.data
+            self.data = self._normalize_sensors(self.client.data)
+
+    def _normalize_sensors(self, data: dict[str, Any]) -> dict[str, Any]:
+        """On 6003 zoned systems, controlling sensor is status 4; fall back to built-in sensor."""
+        normalized = dict(data)
+        # Indoor humidity fallback
+        hum_status = normalized.get(Attribute.INDOOR_HUMIDITY_CONTROLLING_SENSOR_STATUS)
+        builtin_hum = normalized.get(Attribute.BUILT_IN_HUMIDITY_SENSOR_VALUE)
+        if (hum_status is None or hum_status != 0) and builtin_hum is not None:
+            normalized[Attribute.INDOOR_HUMIDITY_CONTROLLING_SENSOR_STATUS] = 0
+            normalized[Attribute.INDOOR_HUMIDITY_CONTROLLING_SENSOR_VALUE] = builtin_hum
+
+        # Indoor temperature fallback
+        temp_status = normalized.get(Attribute.INDOOR_TEMPERATURE_CONTROLLING_SENSOR_STATUS)
+        builtin_temp = normalized.get(Attribute.BUILT_IN_TEMPERATURE_SENSOR_VALUE)
+        if (temp_status is None or temp_status != 0) and builtin_temp is not None:
+            normalized[Attribute.INDOOR_TEMPERATURE_CONTROLLING_SENSOR_STATUS] = 0
+            normalized[Attribute.INDOOR_TEMPERATURE_CONTROLLING_SENSOR_VALUE] = builtin_temp
+
+        return normalized
 
     @callback
     @override
@@ -164,7 +302,7 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
 
         old_device_info = self.create_device_info(self.data)
 
-        self.data = self.data | data
+        self.data = self._normalize_sensors(self.data | data)
 
         self.async_update_listeners()
 
@@ -209,13 +347,17 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
             await self.client.read_thermostat_status()
 
     async def _periodic_sensor_poll(self) -> None:
-        """Periodically poll (5, 1) full sensor array (LAT/ODT) and (3, 5) Heat Blast."""
+        """Periodically poll (5, 1) full sensor array (LAT/ODT), (3, 5) Heat Blast, and equipment status."""
         while True:
             await asyncio.sleep(SENSOR_POLL_INTERVAL)
             try:
                 await self._send_raw_read(FunctionalDomain.SENSORS, 1)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.35)
                 await self._send_raw_read(FunctionalDomain.SCHEDULING, 5)
+                await asyncio.sleep(0.35)
+                await self.client.read_thermostat_status()
+                await asyncio.sleep(0.35)
+                await self.client.read_iaq_status()
             except Exception:
                 _LOGGER.debug("Periodic sensor poll skipped", exc_info=True)
 
@@ -354,8 +496,30 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
             await self.client.wait_for_response(domain, attr, 10)
 
         await self.client.read_thermostat_status()
+        await self.client.wait_for_response(FunctionalDomain.STATUS, 6, 10)
+
         await self.client.read_iaq_status()
         await self.client.wait_for_response(FunctionalDomain.STATUS, 7, 10)
+
+        await self.client.read_control()
+        await self.client.wait_for_response(FunctionalDomain.CONTROL, 1, 10)
+
+        # Ensure critical IAQ and LAT attributes are populated; retry once if missing
+        if Attribute.HUMIDIFICATION_AVAILABLE not in self.data:
+            await asyncio.sleep(0.35)
+            await self.client.read_thermostat_iaq_available()
+            await self.client.wait_for_response(FunctionalDomain.CONTROL, 7, 5)
+
+        if Attribute.LAT_SENSOR_STATUS not in self.data:
+            await asyncio.sleep(0.35)
+            await self._send_raw_read(FunctionalDomain.SENSORS, 1)
+            await self.client.wait_for_response(FunctionalDomain.SENSORS, 1, 5)
+
+        if getattr(self.client, "protocol", None) is not None:
+            try:
+                await self.client.protocol.configure_cos()
+            except Exception:
+                _LOGGER.debug("Failed to configure COS", exc_info=True)
 
         if self.config_entry is not None and (info := self.create_device_info(self.data)):
             dr.async_get(self.hass).async_get_or_create(

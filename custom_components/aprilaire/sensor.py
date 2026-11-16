@@ -301,14 +301,14 @@ class AprilaireHumiditySensor(BaseAprilaireSensor):
     """Humidity sensor entity for Aprilaire."""
 
     status_sensor_available_value = 0
-    status_sensor_exists_values = [0, 1, 2]
+    status_sensor_exists_values = [0, 1, 2, 4]
 
 
 class AprilaireTemperatureSensor(BaseAprilaireSensor):
     """Temperature sensor entity for Aprilaire."""
 
     status_sensor_available_value = 0
-    status_sensor_exists_values = [0, 1, 2]
+    status_sensor_exists_values = [0, 1, 2, 4]
 
     @property
     @override
