@@ -9,6 +9,7 @@ from typing import Any, override
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import BaseDataUpdateCoordinatorProtocol
@@ -155,19 +156,30 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
         await self.client.read_thermostat_status()
 
     async def async_set_heat_blast(self, enabled: bool) -> None:
-        """Enable or disable Heat Blast (3, 5) and read back state."""
-        if self.client.connected and self.client.protocol is not None:
-            await self.client.protocol._send_packet(
-                Packet(
-                    Action.WRITE,
-                    FunctionalDomain.SCHEDULING,
-                    5,
-                    raw_data=[1 if enabled else 0],
-                )
+        """Turn Heat Blast (3, 5) on or off and confirm it by reading it back.
+
+        The thermostat does not answer the write itself; a rejected write is
+        only visible as a NACK. The read-back is queued behind the write, so it
+        reports the state after the write was handled.
+        """
+        protocol = self.client.protocol
+        if not self.client.connected or protocol is None:
+            raise HomeAssistantError("The AprilAire thermostat is not connected")
+        await protocol._send_packet(
+            Packet(
+                Action.WRITE,
+                FunctionalDomain.SCHEDULING,
+                5,
+                raw_data=[1 if enabled else 0],
             )
-            await self._send_raw_read(FunctionalDomain.SCHEDULING, 5)
-            await self.client.read_control()
-            await self.client.read_thermostat_status()
+        )
+        result = await protocol.read(FunctionalDomain.SCHEDULING, 5)
+        await self.client.read_control()
+        await self.client.read_thermostat_status()
+        if result is None or result.get(ATTR_HEAT_BLAST) != int(enabled):
+            raise HomeAssistantError(
+                f"The thermostat did not turn Heat Blast {'on' if enabled else 'off'}"
+            )
 
     async def _periodic_sensor_poll(self) -> None:
         """Periodically poll (5, 1) full sensor array (LAT/ODT), (3, 5) Heat Blast, and equipment status."""

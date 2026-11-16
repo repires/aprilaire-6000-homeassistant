@@ -17,6 +17,30 @@ ATTR_ZONE_COUNT = "zone_count"
 ATTR_DAT_LOW_LIMIT = "dat_low_limit"
 ATTR_DAT_HIGH_LIMIT = "dat_high_limit"
 
+# Model numbers whose outgoing frames are spaced `PACED_FRAME_INTERVAL` apart.
+# 28 is the 6003. Its automation port relays each frame to the zone panel, and
+# on the tested unit (GainSpan 4.14 firmware) back-to-back frames during
+# connection setup led to dropped responses and disconnects; 0.30 s between
+# frames stopped them. That is the interval that worked there, not a
+# documented minimum. Until IDENTIFICATION reports the model, frames are paced
+# as if it were a 6003, because the setup burst goes out before it is known.
+PACED_MODEL_NUMBERS = frozenset({28})
+PACED_FRAME_INTERVAL = 0.30
+UNPACED_FRAME_INTERVAL = 0.05
+
+# COS subscription mask (spec 7.1) in wire order. This matches what
+# pyaprilaire 0.9.1 writes, except that Heat Blast is on: SCHEDULING 5 is
+# decoded below, so its COS keeps the Heat Blast switch current between polls.
+# Upstream made the same change (pyaprilaire PR #126).
+COS_HEAT_BLAST_INDEX = 15
+COS_SUBSCRIPTION_MASK = (
+    1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1,
+    1,  # Heat Blast
+    0, 0, 0, 0, 1,
+    0,  # Reserved
+    1, 0, 1, 1, 1, 0, 0,
+)  # fmt: skip
+
 # This table belongs to this component; importing it never changes pyaprilaire.
 _PACKET_MAPPING = deepcopy(MAPPING)
 for action in (Action.READ_RESPONSE, Action.COS):
@@ -33,6 +57,8 @@ for action in (Action.READ_RESPONSE, Action.COS):
         (Attribute.GAINSPAN_FIRMWARE_MAJOR_REVISION, ValueType.INTEGER),
         (Attribute.GAINSPAN_FIRMWARE_MINOR_REVISION, ValueType.INTEGER),
     ]
+    # SETUP 10 (zone system settings) is undocumented in the Home Automation
+    # spec; the field offsets come from 6003 captures. Other models may NACK it.
     mapping.setdefault(FunctionalDomain.SETUP, {})[10] = [
         (None, None),
         (None, None),
@@ -158,7 +184,7 @@ class AprilaireProtocol(_AprilaireClientProtocol):
         self._tasks = set()
         self._responses = {}
         self._sequence = 0
-        self.pacing = 0.30
+        self.pacing = PACED_FRAME_INTERVAL
 
     def connection_made(self, transport):
         self.transport = transport
@@ -204,6 +230,17 @@ class AprilaireProtocol(_AprilaireClientProtocol):
                 self.transport.close()
             self.closed.set()
 
+    async def configure_cos(self):
+        """Write the COS subscription mask, including Heat Blast."""
+        await self._send_packet(
+            Packet(
+                Action.WRITE,
+                FunctionalDomain.STATUS,
+                1,
+                raw_data=list(COS_SUBSCRIPTION_MASK),
+            )
+        )
+
     def data_received(self, data):
         self._handle_packets(self.decoder.feed(data))
 
@@ -233,8 +270,10 @@ class AprilaireProtocol(_AprilaireClientProtocol):
                 return
             if Attribute.MODEL_NUMBER not in self.data:
                 await self.read(FunctionalDomain.IDENTIFICATION, 1)
-            is_6003 = self.data.get(Attribute.MODEL_NUMBER) == 28
-            self.pacing = 0.30 if is_6003 else 0.05
+            model_number = self.data.get(Attribute.MODEL_NUMBER)
+            is_6003 = model_number == 28
+            paced = model_number is None or model_number in PACED_MODEL_NUMBERS
+            self.pacing = PACED_FRAME_INTERVAL if paced else UNPACED_FRAME_INTERVAL
             for domain, attribute in [
                 (FunctionalDomain.CONTROL, 7),
                 (FunctionalDomain.CONTROL, 1),
