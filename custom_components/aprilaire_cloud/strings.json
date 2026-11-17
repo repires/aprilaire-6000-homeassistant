@@ -189,9 +189,14 @@
         "data": {
           "safety_refresh_minutes": "Safety refresh interval (minutes)",
           "fallback_refresh_minutes": "Fallback refresh interval (minutes)",
-          "enable_extra_diagnostics": "Enable extra diagnostic entities by default"
+          "enable_extra_diagnostics": "Enable extra diagnostic entities by default",
+          "range_min_c": "Temperature range minimum (°C)",
+          "range_max_c": "Temperature range maximum (°C)"
         }
       }
+    },
+    "error": {
+      "invalid_range": "The range must span at least 2°C to preserve the auto-mode deadband."
     }
   }
 }

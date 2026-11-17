@@ -69,22 +69,9 @@ _HOLD_ID_BY_VALUE = {value: key for key, value in _HOLD_BY_ID.items()}
 _CONFIRMED_8920W_MODES = ("off", "heat", "cool", "auto")
 _CONFIRMED_8920W_FANS = ("auto", "on", "circulate")
 _CONFIRMED_8920W_HOLDS = ("none", "temporary", "permanent", "vacation")
-_CONFIRMED_8920W_MODELS = frozenset(
-    {
-        "8920W",
-        "8920W_GS",
-        "6003",
-        "6003_GS",
-        "6002",
-        "6000",
-        "8840",
-        "8840_GS",
-        "8840M",
-        "8830",
-        "8820",
-        "8810",
-    }
-)
+_CONFIRMED_8920W_MODELS = frozenset({"8920W", "8920W_GS"})
+_CONFIRMED_6003_MODELS = frozenset({"6003", "6003_GS"})
+_CONFIRMED_THERMOSTAT_MODELS = _CONFIRMED_8920W_MODELS | _CONFIRMED_6003_MODELS
 _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT = "C"
 _CONFIRMED_8920W_DISPLAY_TEMPERATURE_UNIT = "F"
 _CONFIRMED_8920W_HEAT_RANGE_F = (40, 90)
@@ -94,8 +81,23 @@ _CONFIRMED_8920W_STEP_C = 5 / 9
 _TEMPERATURE_WIRE_DECIMALS = 2
 _TEMPERATURE_CONFIRM_ABS_TOLERANCE_C = 0.011
 _TEMPERATURE_WIRE_RANGE_TOLERANCE_F = 0.02
-_ACTIVE_HEATING_STATUSES = frozenset({"active", "heating", "on", "stage1"})
-_ACTIVE_COOLING_STATUSES = frozenset({"active", "cooling", "on", "stage1"})
+_ACTIVE_HEATING_STATUSES = frozenset(
+    {
+        "active",
+        "heating",
+        "heat",
+        "aux-heat",
+        "emergency-heat",
+        "on",
+        "stage1",
+        "stage2",
+        "stage3",
+        "stage4",
+    }
+)
+_ACTIVE_COOLING_STATUSES = frozenset(
+    {"active", "cooling", "cool", "on", "stage1", "stage2", "stage3", "stage4"}
+)
 _INACTIVE_OPERATING_STATUSES = frozenset({"idle", "inactive", "off"})
 _OPERATING_STATE_BY_EQUIPMENT_STATUS = {
     "off": "off",
@@ -214,8 +216,7 @@ def _zone_dynamic_sensor_keys(
     if "outdoorHumidity" in status:
         keys.append(f"{prefix}_outdoor_humidity")
     if any(
-        key in status
-        for key in ("equipmentStatus", "heatingStatus", "coolingStatus", "isFanOn")
+        key in status for key in ("equipmentStatus", "heatingStatus", "coolingStatus", "isFanOn")
     ):
         keys.append(f"{prefix}_equipment_status")
     if "hvacServiceRemaining" in status or "hvacService" in status:
@@ -249,16 +250,8 @@ def _attached_humidifier_entity_keys(
     status = record.status_payloads.get("iaq_humidifier", {})
     panel = status.get("waterPanelService")
     panel = panel if isinstance(panel, dict) else {}
-    sensors = (
-        ["attached_humidifier_water_panel_remaining"]
-        if "remaining" in panel
-        else []
-    )
-    binary = (
-        ["attached_humidifier_water_panel_service"]
-        if "needsService" in panel
-        else []
-    )
+    sensors = ["attached_humidifier_water_panel_remaining"] if "remaining" in panel else []
+    binary = ["attached_humidifier_water_panel_service"] if "needsService" in panel else []
     return sensors, binary
 
 
@@ -381,9 +374,7 @@ def _authoritative_zone_settings(record: DeviceRecord, zone: str) -> dict[str, A
 
 def _effective_zone_settings(record: DeviceRecord, zone: str) -> dict[str, Any]:
     """Return the latest confirmed or locally pending settings for a zone."""
-    settings = record.effective_device_settings.get(
-        thermostat_status_key_for_zone(zone)
-    )
+    settings = record.effective_device_settings.get(thermostat_status_key_for_zone(zone))
     return settings if isinstance(settings, dict) else {}
 
 
@@ -392,7 +383,12 @@ def _has_confirmed_setpoint_contract(
     zones: tuple[str, ...],
 ) -> bool:
     """Return whether the exposed zones have a valid numeric heat/cool setpoint contract."""
-    if not zones:
+    model = _thermostat_model(record)
+    if model not in _CONFIRMED_THERMOSTAT_MODELS or not zones:
+        return False
+    if model in _CONFIRMED_8920W_MODELS and (
+        _display_temperature_unit(record) != "F" or zones != ("PZ1",)
+    ):
         return False
     for zone in zones:
         settings = _authoritative_zone_settings(record, zone)
@@ -408,9 +404,7 @@ def _has_confirmed_setpoint_contract(
 
 def _numeric_from(primary: dict[str, Any], fallback: dict[str, Any], *keys: str) -> float | None:
     """Return a numeric first-present value from two payloads."""
-    return coerce_float(
-        first_value(first_present(primary, *keys), first_present(fallback, *keys))
-    )
+    return coerce_float(first_value(first_present(primary, *keys), first_present(fallback, *keys)))
 
 
 def _normalized_status(value: Any) -> str | None:
@@ -430,14 +424,24 @@ def _native_temperature_unit(
     status: dict[str, Any],
 ) -> str | None:
     """Return a native payload unit, defaulting to Celsius for AprilAire cloud thermostats."""
-    if _thermostat_model(record) in _CONFIRMED_8920W_MODELS:
+    if _thermostat_model(record) in _CONFIRMED_THERMOSTAT_MODELS:
         return _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT
-    return explicit_temperature_unit(settings, status) or _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT
+    return explicit_temperature_unit(settings, status)
 
 
 def _display_temperature_unit(record: DeviceRecord) -> str | None:
     """Return only the thermostat's explicit display preference."""
-    return explicit_temperature_unit(record.device_setup)
+    if explicit := explicit_temperature_unit(record.device_setup):
+        return explicit
+    scales = []
+    for key, settings in record.device_settings.items():
+        if key not in THERMOSTAT_ZONE_SETTINGS_KEYS.values() or not isinstance(settings, dict):
+            continue
+        value = settings.get("scale")
+        if not isinstance(value, str) or value not in {"F", "C"}:
+            return None
+        scales.append(value)
+    return scales[0] if scales and len(set(scales)) == 1 else None
 
 
 def _fahrenheit_to_celsius(value: float) -> float:
@@ -501,11 +505,7 @@ def _explicit_equipment_installation(
     status_key: str,
 ) -> bool | None:
     """Return explicit IAQ installation state from setup/settings/status."""
-    values = [
-        record.device_setup.get(key)
-        for key in payload_keys
-        if key in record.device_setup
-    ]
+    values = [record.device_setup.get(key) for key in payload_keys if key in record.device_setup]
     values.extend(
         record.effective_device_settings.get(key)
         for key in payload_keys
@@ -552,11 +552,15 @@ class ThermostatProfile:
     def has_required_status(self, record: DeviceRecord) -> bool:
         """Return whether all explicit zones and installed equipment have status."""
         zones = thermostat_zone_keys_for_record(record, include_hierarchy=True)
-        return bool(zones) and all(
-            thermostat_status_key_for_zone(zone) in record.status_payloads for zone in zones
-        ) and all(
-            status_key in record.status_payloads
-            for status_key, _ in self._installed_iaq_status_requests(record)
+        return (
+            bool(zones)
+            and all(
+                thermostat_status_key_for_zone(zone) in record.status_payloads for zone in zones
+            )
+            and all(
+                status_key in record.status_payloads
+                for status_key, _ in self._installed_iaq_status_requests(record)
+            )
         )
 
     def normalize(self, record: DeviceRecord) -> NormalizedThermostatState:
@@ -589,9 +593,7 @@ class ThermostatProfile:
             )
         current_humidity = select_sensor_reading(status.get("humSensors"))
         if current_humidity is None:
-            current_humidity = _numeric_from(
-                status, settings, "currentHumidity", "CurrentHumidity"
-            )
+            current_humidity = _numeric_from(status, settings, "currentHumidity", "CurrentHumidity")
         service = first_nested(
             status,
             ("hvacService", "remaining"),
@@ -629,12 +631,8 @@ class ThermostatProfile:
             ),
             current_temperature=current_temperature,
             current_humidity=current_humidity,
-            heat_setpoint=_numeric_from(
-                settings, status, "heatSetpoint", "HeatSetpoint", "heat"
-            ),
-            cool_setpoint=_numeric_from(
-                settings, status, "coolSetpoint", "CoolSetpoint", "cool"
-            ),
+            heat_setpoint=_numeric_from(settings, status, "heatSetpoint", "HeatSetpoint", "heat"),
+            cool_setpoint=_numeric_from(settings, status, "coolSetpoint", "CoolSetpoint", "cool"),
             equipment_status=equipment_status,
             heating_status=heating_status,
             cooling_status=cooling_status,
@@ -655,9 +653,7 @@ class ThermostatProfile:
             outdoor_temperature=_numeric_from(
                 status, settings, "outdoorTemperature", "OutdoorTemperature"
             ),
-            outdoor_humidity=_numeric_from(
-                status, settings, "outdoorHumidity", "OutdoorHumidity"
-            ),
+            outdoor_humidity=_numeric_from(status, settings, "outdoorHumidity", "OutdoorHumidity"),
         )
 
     def capabilities(self, record: DeviceRecord) -> DeviceCapabilities:
@@ -687,9 +683,7 @@ class ThermostatProfile:
             CommandType.ATTACHED_HUMIDIFIER_TARGET,
         )
         commands = {
-            command_type: self._command_capability(
-                record, command_type, zones, attached
-            )
+            command_type: self._command_capability(record, command_type, zones, attached)
             for command_type in command_types
         }
         optional_equipment = tuple(
@@ -717,13 +711,8 @@ class ThermostatProfile:
         attached: NormalizedAttachedHumidifierState | None,
     ) -> CommandCapability:
         """Build one access- and evidence-aware command capability."""
-        access_reason = (
-            None if record.hierarchy.access == "manage" else "account_access_read_only"
-        )
-        model_confirmed = (
-            _thermostat_model(record) in _CONFIRMED_8920W_MODELS
-            or bool(zones)
-        )
+        access_reason = None if record.hierarchy.access == "manage" else "account_access_read_only"
+        model_confirmed = _thermostat_model(record) in _CONFIRMED_THERMOSTAT_MODELS
         available = False
         reason = "command_contract_unavailable"
         allowed: tuple[str, ...] = ()
@@ -746,10 +735,7 @@ class ThermostatProfile:
             allowed = _CONFIRMED_8920W_FANS if available else ()
         elif command_type is CommandType.THERMOSTAT_HOLD:
             available = model_confirmed and any(
-                any(
-                    key in _zone_mapping(record, zone)[1]
-                    for key in ("holdType", "HoldType")
-                )
+                any(key in _zone_mapping(record, zone)[1] for key in ("holdType", "HoldType"))
                 for zone in zones
             )
             allowed = _CONFIRMED_8920W_HOLDS if available else ()
@@ -760,7 +746,11 @@ class ThermostatProfile:
             if available:
                 minimum = _fahrenheit_to_celsius(_CONFIRMED_8920W_HEAT_RANGE_F[0])
                 maximum = _fahrenheit_to_celsius(_CONFIRMED_8920W_COOL_RANGE_F[1])
-                step = _CONFIRMED_8920W_STEP_C
+                step = (
+                    0.5
+                    if _thermostat_model(record) in _CONFIRMED_6003_MODELS
+                    else _CONFIRMED_8920W_STEP_C
+                )
                 unit = _CONFIRMED_8920W_NATIVE_TEMPERATURE_UNIT
         elif command_type is CommandType.ATTACHED_HUMIDIFIER_POWER:
             settings = record.effective_device_settings.get("humidifier")
@@ -821,9 +811,7 @@ class ThermostatProfile:
             ),
         ):
             zone_payload = self._encode_zone_command(record, command, capability)
-            payload = {
-                thermostat_status_key_for_zone(command.zone): zone_payload
-            }
+            payload = {thermostat_status_key_for_zone(command.zone): zone_payload}
             if isinstance(command, SetThermostatSetpoints):
                 encoded_command = SetThermostatSetpoints(
                     zone=command.zone,
@@ -837,10 +825,7 @@ class ThermostatProfile:
     def _encode_zone_command(
         self,
         record: DeviceRecord,
-        command: SetThermostatMode
-        | SetThermostatSetpoints
-        | SetThermostatFan
-        | SetThermostatHold,
+        command: SetThermostatMode | SetThermostatSetpoints | SetThermostatFan | SetThermostatHold,
         capability: CommandCapability,
     ) -> dict[str, Any]:
         """Encode one validated zone command in the observed key style."""
@@ -848,6 +833,12 @@ class ThermostatProfile:
             raise CommandNotSupportedError("unknown thermostat zone")
         _, settings, _ = _zone_mapping(record, command.zone)
         if isinstance(command, SetThermostatMode):
+            if command.mode == "auto":
+                heat, cool = coerce_float(settings.get("heat")), coerce_float(settings.get("cool"))
+                if heat is None or cool is None:
+                    raise CommandNotSupportedError("auto mode requires confirmed setpoints")
+                if (cool - heat) * 9 / 5 < _CONFIRMED_8920W_DEADBAND_F - 0.02:
+                    raise CommandValidationError("auto mode requires a valid heat/cool deadband")
             return self._encode_enum_setting(
                 settings,
                 value=command.mode,
@@ -893,6 +884,7 @@ class ThermostatProfile:
                 command.heat,
                 limits=_CONFIRMED_8920W_HEAT_RANGE_F,
                 label="heat",
+                whole_fahrenheit=_thermostat_model(record) in _CONFIRMED_8920W_MODELS,
             )
         )
         cool = (
@@ -902,6 +894,7 @@ class ThermostatProfile:
                 command.cool,
                 limits=_CONFIRMED_8920W_COOL_RANGE_F,
                 label="cool",
+                whole_fahrenheit=_thermostat_model(record) in _CONFIRMED_8920W_MODELS,
             )
         )
         ThermostatProfile._validate_setpoint_range(
@@ -915,11 +908,9 @@ class ThermostatProfile:
             label="cool",
         )
         if (
-            command.heat is not None
-            and command.cool is not None
-            and _fahrenheit_grid(cool) - _fahrenheit_grid(heat)
-            < _CONFIRMED_8920W_DEADBAND_F
-        ):
+            _thermostat_model(record) in _CONFIRMED_8920W_MODELS
+            or _normalize_enum(first_present(settings, "mode", "ModeId"), _MODE_BY_ID) == "auto"
+        ) and (cool - heat) * 9 / 5 < _CONFIRMED_8920W_DEADBAND_F - 0.02:
             raise CommandValidationError(
                 "heat and cool setpoints must be separated by at least 3°F"
             )
@@ -931,13 +922,20 @@ class ThermostatProfile:
         *,
         limits: tuple[int, int],
         label: str,
+        whole_fahrenheit: bool = False,
     ) -> float:
-        """Resolve one native-C request to a 0.5°C grid (or whole-F grid)."""
+        """Resolve a native-C request on the confirmed model's grid."""
         number = coerce_float(value)
         if number is None:
             raise CommandValidationError(f"{label} setpoint must be finite")
         ThermostatProfile._validate_setpoint_range(number, limits=limits, label=label)
-        return round(number * 2) / 2
+        resolved = (
+            _wire_celsius_from_fahrenheit(_fahrenheit_grid(number))
+            if whole_fahrenheit
+            else round(number * 2) / 2
+        )
+        ThermostatProfile._validate_setpoint_range(resolved, limits=limits, label=label)
+        return resolved
 
     @staticmethod
     def _validate_setpoint_range(
@@ -984,9 +982,7 @@ class ThermostatProfile:
         confirmed = False
         if isinstance(command, SetAttachedHumidifierPower):
             state = normalized.attached_humidifier
-            confirmed = state is not None and state.mode == (
-                "on" if command.enabled else "off"
-            )
+            confirmed = state is not None and state.mode == ("on" if command.enabled else "off")
         elif isinstance(command, SetAttachedHumidifierTarget):
             state = normalized.attached_humidifier
             confirmed = state is not None and state.target_humidity == command.humidity
@@ -1028,9 +1024,13 @@ class ThermostatProfile:
                     confirmed = zone.raw_hold_type == command.hold
         return confirmed
 
-    def mismatch_is_rejection(self, command: DeviceCommand) -> bool:
+    def mismatch_is_rejection(
+        self, command: DeviceCommand, *, record: DeviceRecord | None = None
+    ) -> bool:
         """Keep mismatches inconclusive while the thermostat processes the command."""
-        return False
+        return isinstance(command, SetThermostatSetpoints) and not (
+            record is not None and _thermostat_model(record) in _CONFIRMED_6003_MODELS
+        )
 
     def _installed_iaq_status_requests(
         self,
@@ -1039,7 +1039,11 @@ class ThermostatProfile:
         """Return endpoints only for explicitly installed equipment."""
         return tuple(
             (status_key, endpoint)
-            for _, (status_key, endpoint, payload_keys) in THERMOSTAT_IAQ_EQUIPMENT.items()
+            for _, (
+                status_key,
+                endpoint,
+                payload_keys,
+            ) in THERMOSTAT_IAQ_EQUIPMENT.items()
             if _explicit_equipment_installation(record, payload_keys, status_key) is True
         )
 
@@ -1097,16 +1101,10 @@ class ThermostatProfile:
             current_humidity = next(iter(zones.values())).current_humidity
         return NormalizedAttachedHumidifierState(
             installed=True,
-            mode=(
-                normalize_string(settings.get("mode"))
-                if "mode" in settings
-                else None
-            ),
+            mode=(normalize_string(settings.get("mode")) if "mode" in settings else None),
             current_humidity=current_humidity,
             target_humidity=coerce_int(settings.get("humiditySetpoint")),
-            equipment_status=_normalized_status(
-                first_present(status, "equipmentStatus")
-            ),
+            equipment_status=_normalized_status(first_present(status, "equipmentStatus")),
             water_panel_remaining=coerce_int(panel.get("remaining")),
             water_panel_needs_service=coerce_bool(panel.get("needsService")),
         )

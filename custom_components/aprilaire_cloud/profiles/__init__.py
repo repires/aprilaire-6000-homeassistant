@@ -55,9 +55,7 @@ UNSUPPORTED_REASON_LABELS = {
     "awaiting_device_settings": "device settings not yet available",
     "unsupported_equipment_type": "device family is not understood",
 }
-INCOMPLETE_SUPPORT_REASONS = frozenset(
-    {"awaiting_device_setup", "awaiting_device_settings"}
-)
+INCOMPLETE_SUPPORT_REASONS = frozenset({"awaiting_device_setup", "awaiting_device_settings"})
 
 DEHUMIDIFIER_PROFILE: DeviceProfile = DehumidifierProfile()
 THERMOSTAT_PROFILE: DeviceProfile = ThermostatProfile()
@@ -147,11 +145,7 @@ def record_requires_rest_refresh(
 ) -> bool:
     """Return whether a record requires REST hydration."""
     profiles = profiles_requiring_data(record)
-    if (
-        not record.device_setup
-        and not record.device_settings
-        and not record.status_payloads
-    ):
+    if not record.device_setup and not record.device_settings and not record.status_payloads:
         # A hierarchy reference alone has no family evidence. Fetch only the
         # critical REST status/settings pair; profile-owned optional routes are
         # planned after those responses classify the device.

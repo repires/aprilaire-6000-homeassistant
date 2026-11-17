@@ -4,11 +4,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import cast, override
 
-from pyaprilaire.const import Attribute
-
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from pyaprilaire.const import Attribute
 
 from .coordinator import AprilaireConfigEntry, AprilaireCoordinator
 from .entity import BaseAprilaireEntity

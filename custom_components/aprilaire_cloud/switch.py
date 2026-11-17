@@ -7,7 +7,6 @@ from typing import Any, cast
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .climate import SZ2_LOCK_MAX_C, SZ2_LOCK_MIN_C
 from .coordinator import AprilaireCloudDataUpdateCoordinator
 from .data import AprilaireCloudConfigEntry
 from .entity import (
@@ -19,9 +18,7 @@ from .entity import (
 from .profiles import (
     AprilaireCommandError,
     NormalizedDehumidifierState,
-    NormalizedThermostatState,
     SetDehumidifierPower,
-    SetThermostatSetpoints,
     get_profile,
 )
 from .vendor import AprilaireCloudApiError, AprilaireCloudRateLimitError
@@ -30,8 +27,6 @@ from .vendor import AprilaireCloudApiError, AprilaireCloudRateLimitError
 async def async_setup_entry(hass, entry: AprilaireCloudConfigEntry, async_add_entities) -> None:
     """Set up honest on/off-only control entities and Zone 2 temperature range lock."""
     coordinator = entry.runtime_data.coordinator
-    if not hasattr(coordinator, "sz2_temp_lock_enabled"):
-        coordinator.sz2_temp_lock_enabled = True
 
     def _descriptors_for_device(device_id: str, device):
         profile = get_profile(device.profile_key)
@@ -44,12 +39,17 @@ async def async_setup_entry(hass, entry: AprilaireCloudConfigEntry, async_add_en
                 factory=AprilaireDehumidifierPowerSwitch,
                 args=(coordinator, device_id),
             )
-        if "thermostat_sz2" in desc.climate_keys:
-            yield DynamicEntityDescriptor(
-                unique_id=f"{device_id}_sz2_temp_lock",
-                factory=AprilaireZone2TempLockSwitch,
-                args=(coordinator, device_id),
-            )
+        if (
+            device.device_status.get("model") in {"6003", "6003_GS"}
+            and device.hierarchy.access == "manage"
+        ):
+            for zone in ("SZ2", "SZ3"):
+                if f"thermostat_{zone.lower()}" in desc.climate_keys:
+                    yield DynamicEntityDescriptor(
+                        unique_id=f"{device_id}_{zone.lower()}_temp_lock",
+                        factory=AprilaireZone2TempLockSwitch,
+                        args=(coordinator, device_id, zone),
+                    )
 
     setup_dynamic_platform_entities(
         entry,
@@ -62,70 +62,42 @@ class AprilaireZone2TempLockSwitch(AprilaireCloudEntity, SwitchEntity, RestoreEn
     """Switch to enforce 18.0°C - 23.0°C temperature bounds on Zone 2 (SZ2 / Basement)."""
 
     _attr_icon = "mdi:thermometer-lock"
-    _attr_name = "Basement Temp Lock (18–23°C)"
 
-    def __init__(
-        self,
-        coordinator: AprilaireCloudDataUpdateCoordinator,
-        device_id: str,
-    ) -> None:
-        """Initialize the Zone 2 temperature lock switch."""
-        super().__init__(coordinator, device_id, "sz2_temp_lock")
+    def __init__(self, coordinator, device_id, zone="SZ2") -> None:
+        self._zone_key = zone
+        self._attr_name = f"{zone} temperature range lock"
+        super().__init__(coordinator, device_id, f"{zone.lower()}_temp_lock")
 
     async def async_added_to_hass(self) -> None:
-        """Restore previous state on startup (default ON)."""
+        """Restore this device's opt-in state before starting its policy."""
         await super().async_added_to_hass()
         last_state = await self.async_get_last_state()
-        if last_state is not None and last_state.state in ("on", "off"):
-            self.coordinator.sz2_temp_lock_enabled = last_state.state == "on"
-        else:
-            self.coordinator.sz2_temp_lock_enabled = True
+        self.coordinator.range_locks.set_enabled(
+            self._device_id,
+            self._zone_key,
+            last_state is not None and last_state.state == "on",
+        )
 
     @property
     def is_on(self) -> bool:
-        """Return True if the 18-23°C lock is active."""
-        return bool(getattr(self.coordinator, "sz2_temp_lock_enabled", True))
+        return self.coordinator.range_locks.enabled(self._device_id, self._zone_key)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return lock range metadata."""
-        attrs = dict(super().extra_state_attributes)
-        attrs.update(
-            {
-                "min_temp_c": SZ2_LOCK_MIN_C,
-                "max_temp_c": SZ2_LOCK_MAX_C,
-                "enforced_zone": "SZ2 (Basement)",
-            }
-        )
-        return attrs
+        manager = self.coordinator.range_locks
+        return {
+            "min_temp_c": manager.minimum,
+            "max_temp_c": manager.maximum,
+            "enforced_zone": self._zone_key,
+            "last_error": manager.errors.get((self._device_id, self._zone_key)),
+        }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Enable the 18-23°C lock and immediately clamp SZ2 if out of bounds."""
-        self.coordinator.sz2_temp_lock_enabled = True
+        self.coordinator.range_locks.set_enabled(self._device_id, self._zone_key, True)
         self.coordinator.async_update_listeners()
-        normalized = cast(NormalizedThermostatState | None, self.normalized_state)
-        if normalized and (zone := normalized.zones.get("SZ2")):
-            clamped_heat = None
-            clamped_cool = None
-            if zone.heat_setpoint is not None and not (
-                SZ2_LOCK_MIN_C <= zone.heat_setpoint <= SZ2_LOCK_MAX_C
-            ):
-                clamped_heat = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.heat_setpoint))
-            if zone.cool_setpoint is not None and not (
-                SZ2_LOCK_MIN_C <= zone.cool_setpoint <= SZ2_LOCK_MAX_C
-            ):
-                clamped_cool = max(SZ2_LOCK_MIN_C, min(SZ2_LOCK_MAX_C, zone.cool_setpoint))
-            if clamped_heat is not None or clamped_cool is not None:
-                await self.coordinator.async_execute_command(
-                    self._device_id,
-                    SetThermostatSetpoints(
-                        zone="SZ2", heat=clamped_heat, cool=clamped_cool
-                    ),
-                )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Disable the 18-23°C lock."""
-        self.coordinator.sz2_temp_lock_enabled = False
+        self.coordinator.range_locks.set_enabled(self._device_id, self._zone_key, False)
         self.coordinator.async_update_listeners()
 
 

@@ -35,9 +35,7 @@ def decode_websocket_text_frame(raw_text: str) -> WebSocketFrame:
     if stripped in {"ok", '"ok"', '"Subscribed"'}:
         return WebSocketFrame(WebSocketFrameKind.SUBSCRIBED)
     if not stripped:
-        return WebSocketFrame(
-            WebSocketFrameKind.PROTOCOL_ERROR, error_code="empty_text_frame"
-        )
+        return WebSocketFrame(WebSocketFrameKind.PROTOCOL_ERROR, error_code="empty_text_frame")
 
     try:
         data = json.loads(stripped)

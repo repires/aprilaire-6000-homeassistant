@@ -19,9 +19,8 @@ async def async_setup_entry(
     coordinator = config_entry.runtime_data
     assert config_entry.unique_id is not None
 
-    async_add_entities(
-        [AprilaireHeatBlastSwitch(coordinator, config_entry.unique_id)]
-    )
+    if ATTR_HEAT_BLAST in coordinator.data:
+        async_add_entities([AprilaireHeatBlastSwitch(coordinator, config_entry.unique_id)])
 
 
 class AprilaireHeatBlastSwitch(BaseAprilaireEntity, SwitchEntity):

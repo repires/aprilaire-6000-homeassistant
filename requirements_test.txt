@@ -1,0 +1,7 @@
+homeassistant==2026.11.1
+pyaprilaire==0.9.1
+pycognito==2024.5.1
+pytest>=9,<10
+pytest-asyncio>=1,<2
+pytest-socket>=0.8,<1
+ruff>=0.17,<0.18

@@ -5,13 +5,23 @@
     "climate.thermostats_heating",
     "climate.air_purifiers_humidifiers"
   ],
-  "codeowners": ["@chamberlain2007", "@repires"],
+  "codeowners": [
+    "@chamberlain2007",
+    "@repires"
+  ],
   "config_flow": true,
-  "connectivity": ["network"],
-  "documentation": "https://www.home-assistant.io/integrations/aprilaire",
+  "connectivity": [
+    "network"
+  ],
+  "documentation": "https://github.com/repires/aprilaire-6000-homeassistant",
   "integration_type": "device",
   "iot_class": "local_push",
-  "loggers": ["pyaprilaire"],
-  "requirements": ["pyaprilaire==0.9.1"],
-  "version": "1.1.0"
+  "loggers": [
+    "pyaprilaire"
+  ],
+  "requirements": [
+    "pyaprilaire==0.9.1"
+  ],
+  "version": "1.3.0",
+  "issue_tracker": "https://github.com/repires/aprilaire-6000-homeassistant/issues"
 }

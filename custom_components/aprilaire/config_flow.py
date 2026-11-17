@@ -4,11 +4,10 @@ import logging
 from typing import Any, override
 
 import probatio
-from pyaprilaire.const import Attribute
-
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers.device_registry import format_mac
+from pyaprilaire.const import Attribute
 
 from .const import DOMAIN
 from .coordinator import AprilaireCoordinator
@@ -29,15 +28,11 @@ class AprilaireConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     @override
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
 
         if user_input is None:
-            return self.async_show_form(
-                step_id="user", data_schema=STEP_USER_DATA_SCHEMA
-            )
+            return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA)
 
         coordinator = AprilaireCoordinator(
             self.hass, None, user_input[CONF_HOST], user_input[CONF_PORT]
@@ -51,7 +46,7 @@ class AprilaireConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             ready = await coordinator.wait_for_ready(ready_callback)
         finally:
-            coordinator.stop_listen()
+            await coordinator.async_stop()
 
         mac_address = coordinator.data.get(Attribute.MAC_ADDRESS)
 

@@ -279,8 +279,7 @@ class CognitoAuthProvider:
                 not force_refresh
                 and self._id_token is not None
                 and self._token_expires_at is not None
-                and now
-                < self._token_expires_at - timedelta(seconds=AUTH_REFRESH_MARGIN_SECONDS)
+                and now < self._token_expires_at - timedelta(seconds=AUTH_REFRESH_MARGIN_SECONDS)
             ):
                 return self._id_token
 
@@ -311,8 +310,7 @@ class CognitoAuthProvider:
         """Return whether full-login age should be reset on this renewal."""
         return (
             self._last_full_login_at is not None
-            and now
-            >= self._last_full_login_at + PROACTIVE_FULL_LOGIN_AGE + self._proactive_jitter
+            and now >= self._last_full_login_at + PROACTIVE_FULL_LOGIN_AGE + self._proactive_jitter
         )
 
     async def _async_full_login_locked(self) -> str:
@@ -369,9 +367,7 @@ class CognitoAuthProvider:
             raise AprilaireCloudInvalidCredentialsError(failure.code, operation) from error
         if failure.kind in {AuthFailureKind.TRANSIENT, AuthFailureKind.REFRESH_REJECTED}:
             self._record_failure(operation, failure.code, "transient_error")
-            raise AprilaireCloudAuthenticationTransientError(
-                failure.code, operation
-            ) from error
+            raise AprilaireCloudAuthenticationTransientError(failure.code, operation) from error
         self._record_failure(operation, failure.code, "protocol_error")
         raise AprilaireCloudAuthenticationProtocolError(failure.code, operation) from error
 

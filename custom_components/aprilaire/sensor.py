@@ -1,9 +1,9 @@
 """The Aprilaire sensor component (including Leaving Air Temp LAT and Zone System Settings)."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, cast, override
-
-from pyaprilaire.const import Attribute
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -11,19 +11,18 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import EntityCategory, PERCENTAGE, UnitOfTemperature
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
+from pyaprilaire.const import Attribute
 
 from .coordinator import (
-    ATTR_DAT_HIGH_LIMIT,
-    ATTR_DAT_LOW_LIMIT,
-    ATTR_ZONE_COUNT,
     AprilaireConfigEntry,
     AprilaireCoordinator,
 )
 from .entity import BaseAprilaireEntity
+from .protocol import ATTR_DAT_HIGH_LIMIT, ATTR_DAT_LOW_LIMIT, ATTR_ZONE_COUNT
 
 DEHUMIDIFICATION_STATUS_MAP: dict[StateType, str] = {
     0: "idle",
@@ -68,10 +67,7 @@ def get_entities(
 ) -> list[BaseAprilaireSensor]:
     """Get the entities for a list of sensor descriptions."""
 
-    entities = (
-        entity_class(coordinator, description, unique_id)
-        for description in descriptions
-    )
+    entities = (entity_class(coordinator, description, unique_id) for description in descriptions)
 
     return [entity for entity in entities if entity.exists]
 
@@ -100,15 +96,11 @@ async def async_setup_entry(
             config_entry.unique_id,
             TEMPERATURE_SENSORS,
         ),
-        *get_entities(
-            AprilaireStatusSensor, coordinator, config_entry.unique_id, STATUS_SENSORS
-        ),
+        *get_entities(AprilaireStatusSensor, coordinator, config_entry.unique_id, STATUS_SENSORS),
     ]
 
     if ATTR_ZONE_COUNT in coordinator.data:
-        entities.append(
-            AprilaireZoneCountSensor(coordinator, config_entry.unique_id)
-        )
+        entities.append(AprilaireZoneCountSensor(coordinator, config_entry.unique_id))
 
     async_add_entities(entities)
 
@@ -273,11 +265,8 @@ class BaseAprilaireSensor(BaseAprilaireEntity, SensorEntity):
     def available(self) -> bool:
         """Return True if the sensor is available."""
 
-        if (
-            self.entity_description.status_key is None
-            or self.status_sensor_available_value is None
-        ):
-            return True
+        if self.entity_description.status_key is None or self.status_sensor_available_value is None:
+            return super().available
 
         if not super().available:
             return False
@@ -292,9 +281,7 @@ class BaseAprilaireSensor(BaseAprilaireEntity, SensorEntity):
     def native_value(self) -> StateType:
         """Return the value reported by the sensor."""
 
-        return cast(
-            StateType, self.coordinator.data.get(self.entity_description.value_key)
-        )
+        return cast(StateType, self.coordinator.data.get(self.entity_description.value_key))
 
 
 class AprilaireHumiditySensor(BaseAprilaireSensor):
