@@ -73,3 +73,12 @@ This component gets the same changes where they apply:
 - Heat Blast was not toggled on the live system.
 
 **Rollback:** restore `aprilaire/{__init__,coordinator,protocol}.py` and `aprilaire/manifest.json` from that backup, then restart HA core.
+
+## Hardware test of HA core #186563 and pyaprilaire 0.10.0rc4 (2026-11-16)
+
+The maintainer asked for this on [pyaprilaire #126](https://github.com/chamberlain2007/pyaprilaire/pull/126). The test used a throwaway HA 2026.11.1 instance with the live local entry paused. The entry was created with the built-in integration and pyaprilaire 0.9.1, then the PR integration and rc4 were loaded on the same storage. The live entry was never migrated, and it reloaded with all 31 entities available afterwards.
+
+- **Migration:** the entry went from 1.1 to 1.2. Entity IDs, entity unique IDs and device identifiers were unchanged. This MAC has no octet below 0x10, so only the no-op path ran.
+- **Control:** the heat target was moved from 21.0 to 21.5 °C, confirmed, and restored to 21.0. Reconnect took 10 s. There were no unexpected disconnects over three connections, including a 60 s watch.
+- **Sync rejected:** the 6003 accepts the 1-byte Sync write (`07 02 01`) and NACKs rc4's 2-byte form (`07 02 01 00`) with 0x13 on every connect. This was reported upstream.
+- **Pacing:** unpaced bursts of 11–14 frames did not drop the connection. The disconnects that originally motivated pacing were seen with 0.9.1's parser, so pacing is a precaution rather than a proven requirement. The comment in `protocol.py` was corrected in the repository only. The deployed 1.3.0 still has the old comment, but its code is otherwise identical.

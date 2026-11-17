@@ -18,12 +18,14 @@ ATTR_DAT_LOW_LIMIT = "dat_low_limit"
 ATTR_DAT_HIGH_LIMIT = "dat_high_limit"
 
 # Model numbers whose outgoing frames are spaced `PACED_FRAME_INTERVAL` apart.
-# 28 is the 6003. Its automation port relays each frame to the zone panel, and
-# on the tested unit (GainSpan 4.14 firmware) back-to-back frames during
-# connection setup led to dropped responses and disconnects; 0.30 s between
-# frames stopped them. That is the interval that worked there, not a
-# documented minimum. Until IDENTIFICATION reports the model, frames are paced
-# as if it were a 6003, because the setup burst goes out before it is known.
+# 28 is the 6003. Pacing was added after dropped responses and disconnects
+# during connection setup on the tested unit (GainSpan 4.14 firmware), but
+# those were seen with pyaprilaire 0.9.1's parser. On 2026-11-16, unpaced
+# bursts of 11-14 frames from 0.10.0rc4 did not drop the connection, so the
+# drops may have been parse errors rather than flow control. The pacing is
+# kept as a cheap precaution; 0.30 s is what was used, not a documented
+# minimum. Until IDENTIFICATION reports the model, frames are paced as if it
+# were a 6003, because the setup burst goes out before it is known.
 PACED_MODEL_NUMBERS = frozenset({28})
 PACED_FRAME_INTERVAL = 0.30
 UNPACED_FRAME_INTERVAL = 0.05
