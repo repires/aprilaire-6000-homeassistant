@@ -58,10 +58,10 @@ def test_auto_both_sides_changed_into_deadband_is_rejected():
 
 
 def test_companion_cannot_be_pushed_past_its_limit():
-    # Cool is already at the top of its range, so heat cannot rise into the deadband.
-    with pytest.raises(CommandValidationError):
+    # Heat 32C (89.6F) is valid, but cool would need 34C (93.2F), above 93F.
+    with pytest.raises(CommandValidationError, match="out of range"):
         ThermostatProfile().encode_command(
-            thermostat(mode="auto", heat=30, cool=33.5), SetThermostatSetpoints("PZ1", heat=33)
+            thermostat(mode="auto", heat=30, cool=32.5), SetThermostatSetpoints("PZ1", heat=32)
         )
 
 
