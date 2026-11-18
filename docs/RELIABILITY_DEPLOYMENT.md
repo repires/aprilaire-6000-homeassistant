@@ -82,3 +82,19 @@ The maintainer asked for this on [pyaprilaire #126](https://github.com/chamberla
 - **Control:** the heat target was moved from 21.0 to 21.5 °C, confirmed, and restored to 21.0. Reconnect took 10 s. There were no unexpected disconnects over three connections, including a 60 s watch.
 - **Sync rejected:** the 6003 accepts the 1-byte Sync write (`07 02 01`) and NACKs rc4's 2-byte form (`07 02 01 00`) with 0x13 on every connect. This was reported upstream.
 - **Pacing:** unpaced bursts of 11–14 frames did not drop the connection. The disconnects that originally motivated pacing were seen with 0.9.1's parser, so pacing is a precaution rather than a proven requirement. The comment in `protocol.py` was corrected in the repository only. The deployed 1.3.0 still has the old comment, but its code is otherwise identical.
+
+## Cloud 0.4.2: moving the other setpoint to keep the deadband (2026-11-18)
+
+Deployed after merging PR #2. A backup is at `~/.hermes/backups/home-assistant/aprilaire-cloud-042-20261118T210155Z`. The only drift before deploying was the comment-only `aprilaire/protocol.py` change, which this deploy also installed. Live files now match `main`. After the restart on HA 2026.11.2, both entries loaded and all 31 entities were available, with no control changes and no AprilAire log entries.
+
+A live test on the 6003 primary zone (PZ1) used the cloud climate entity. Baseline: heat mode, 21.5/22.0 °C, room 23.0 °C.
+
+| Step | Request | Result |
+|---|---|---|
+| Prepare | heat mode, widen to 21.5/23.5 | applied |
+| Enter auto | `heat_cool` | applied |
+| Raise heat into the deadband | heat 22.5, cool unchanged | 22.5/24.5: cool pushed up by 2.0 °C |
+| Lower cool into the deadband | cool 23.5, heat unchanged | 21.5/23.5: heat pushed down by 2.0 °C |
+| Restore | heat mode, then 21.5/22.0 | exact baseline, confirmed again 30 s later |
+
+Each write was confirmed in 2–7 s. The HVAC stayed idle throughout, and the basement zone (SZ2, range-locked) was not touched.
