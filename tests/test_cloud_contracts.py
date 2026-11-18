@@ -33,11 +33,62 @@ def test_unknown_model_cannot_gain_writes_from_numeric_json():
         )
 
 
-def test_partial_auto_update_checks_final_pair_deadband():
+def test_partial_auto_update_moves_companion_to_keep_deadband():
+    # Heat 21 -> 22 with cool at 22: cool moves up to the nearest grid value
+    # that keeps the 3F deadband (2.0C on the 0.5C grid; 1.5C is only 2.7F).
+    result = ThermostatProfile().encode_command(
+        thermostat(mode="auto"), SetThermostatSetpoints("PZ1", heat=22)
+    )
+    assert result.payload == {"thermostatPZ1": {"heat": 22.0, "cool": 24.0}}
+
+
+def test_auto_cool_change_moves_heat_down():
+    result = ThermostatProfile().encode_command(
+        thermostat(mode="auto", heat=21, cool=24), SetThermostatSetpoints("PZ1", heat=21, cool=22)
+    )
+    assert result.payload == {"thermostatPZ1": {"heat": 20.0, "cool": 22.0}}
+
+
+def test_auto_both_sides_changed_into_deadband_is_rejected():
     with pytest.raises(CommandValidationError):
         ThermostatProfile().encode_command(
-            thermostat(mode="auto"), SetThermostatSetpoints("PZ1", heat=22)
+            thermostat(mode="auto", heat=20, cool=25),
+            SetThermostatSetpoints("PZ1", heat=22, cool=22.5),
         )
+
+
+def test_companion_cannot_be_pushed_past_its_limit():
+    # Cool is already at the top of its range, so heat cannot rise into the deadband.
+    with pytest.raises(CommandValidationError):
+        ThermostatProfile().encode_command(
+            thermostat(mode="auto", heat=30, cool=33.5), SetThermostatSetpoints("PZ1", heat=33)
+        )
+
+
+def test_8920w_heat_side_boundary_from_issue_8_capture():
+    # Live 8920W capture (billda/ha-aprilaire-cloud#8): heat 70F -> 73F with
+    # cool at 75F. The thermostat stores 75F as 23.88. Heat must stay at
+    # the requested 73F and cool move to 76F.
+    record = replace(
+        thermostat("8920W", mode="auto", heat=21.11, cool=23.88),
+        device_setup={"type": "thermostat", "thermostat": {"temperatureUnit": "F"}},
+    )
+    result = ThermostatProfile().encode_command(
+        record, SetThermostatSetpoints("PZ1", heat=22.78, cool=23.89)
+    )
+    assert result.payload == {"thermostatPZ1": {"heat": 22.78, "cool": 24.44}}
+
+
+def test_8920w_cool_side_boundary_from_issue_8_capture():
+    # Same capture: cool 75F -> 72F with heat at 70F; heat moves to 69F.
+    record = replace(
+        thermostat("8920W", mode="auto", heat=21.11, cool=23.88),
+        device_setup={"type": "thermostat", "thermostat": {"temperatureUnit": "F"}},
+    )
+    result = ThermostatProfile().encode_command(
+        record, SetThermostatSetpoints("PZ1", heat=21.11, cool=22.22)
+    )
+    assert result.payload == {"thermostatPZ1": {"heat": 20.56, "cool": 22.22}}
 
 
 def test_single_heat_mode_preserves_crossed_inactive_setpoint():
@@ -113,12 +164,14 @@ def test_only_6003_setpoint_mismatches_remain_inconclusive():
     assert not profile.mismatch_is_rejection(command, record=thermostat("6003"))
 
 
-def test_existing_8920w_deadband_contract_is_preserved_in_single_mode():
+def test_8920w_deadband_is_kept_in_single_mode_by_moving_cool():
+    # The 8920W enforces its deadband in every mode, so the inactive cool
+    # setpoint moves rather than the write being refused.
     record = replace(
         thermostat("8920W", mode="heat", heat=21, cool=22), device_setup={"temperatureUnit": "F"}
     )
-    with pytest.raises(CommandValidationError):
-        ThermostatProfile().encode_command(record, SetThermostatSetpoints("PZ1", heat=23))
+    result = ThermostatProfile().encode_command(record, SetThermostatSetpoints("PZ1", heat=23))
+    assert result.payload == {"thermostatPZ1": {"heat": 22.78, "cool": 24.44}}
 
 
 def test_settings_scale_is_explicit_unit_evidence_for_8920w():
