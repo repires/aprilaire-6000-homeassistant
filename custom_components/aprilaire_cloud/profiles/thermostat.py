@@ -985,7 +985,7 @@ class ThermostatProfile:
             )
         except CommandValidationError as err:
             raise CommandValidationError(
-                f"keeping the 3°F heat/cool deadband would move the other setpoint out of range: {err}"
+                f"keeping the 3°F deadband would move the other setpoint out of range: {err}"
             ) from err
         return heat, cool
 
