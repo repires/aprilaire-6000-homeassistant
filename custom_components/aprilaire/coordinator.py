@@ -20,6 +20,7 @@ from pyaprilaire.packet import Packet
 from .const import DOMAIN
 from .protocol import (
     ATTR_HEAT_BLAST,
+    ATTR_ZONE_COUNT,
     AprilaireLocalClient,
 )
 
@@ -182,20 +183,39 @@ class AprilaireCoordinator(BaseDataUpdateCoordinatorProtocol):
             )
 
     async def _periodic_sensor_poll(self) -> None:
-        """Periodically poll (5, 1) full sensor array (LAT/ODT), (3, 5) Heat Blast, and equipment status."""
+        """Poll the attributes the thermostat does not report through COS."""
         while True:
             await asyncio.sleep(SENSOR_POLL_INTERVAL)
             try:
-                await self._send_raw_read(FunctionalDomain.SENSORS, 1)
-                await asyncio.sleep(0.35)
-                if ATTR_HEAT_BLAST in self.data:
-                    await self._send_raw_read(FunctionalDomain.SCHEDULING, 5)
-                await asyncio.sleep(0.35)
-                await self.client.read_thermostat_status()
-                await asyncio.sleep(0.35)
-                await self.client.read_iaq_status()
+                await self._poll_once()
             except Exception:
                 _LOGGER.debug("Periodic sensor poll skipped", exc_info=True)
+
+    async def _poll_once(self) -> None:
+        """Read the full sensor array (LAT/ODT), Heat Blast and status, and catch up
+        on initialization reads that timed out.
+
+        Right after an HA restart the 6003 can leave initialization reads
+        unanswered. Zone count (SETUP 10) and Heat Blast (SCHEDULING 5) are not
+        sent by COS, so without a retry their entities would never be created.
+        """
+        data = self.data
+        is_6003 = data.get(Attribute.MODEL_NUMBER) == 28
+        reads: list[tuple[FunctionalDomain, int]] = [(FunctionalDomain.SENSORS, 1)]
+        if is_6003 or ATTR_HEAT_BLAST in data:
+            reads.append((FunctionalDomain.SCHEDULING, 5))
+        if is_6003 and ATTR_ZONE_COUNT not in data:
+            reads.append((FunctionalDomain.SETUP, 10))
+        if Attribute.HUMIDIFICATION_AVAILABLE not in data:
+            reads.append((FunctionalDomain.CONTROL, 7))
+        if Attribute.INDOOR_TEMPERATURE_CONTROLLING_SENSOR_STATUS not in data:
+            reads.append((FunctionalDomain.SENSORS, 2))
+        for domain, attribute in reads:
+            await self._send_raw_read(domain, attribute)
+            await asyncio.sleep(0.35)
+        await self.client.read_thermostat_status()
+        await asyncio.sleep(0.35)
+        await self.client.read_iaq_status()
 
     async def start_listen(self) -> None:
         """Start listening for data."""

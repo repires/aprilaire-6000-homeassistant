@@ -21,7 +21,7 @@ from .coordinator import (
     AprilaireConfigEntry,
     AprilaireCoordinator,
 )
-from .entity import BaseAprilaireEntity
+from .entity import BaseAprilaireEntity, EntityCandidate, async_add_entities_when_ready
 from .protocol import ATTR_DAT_HIGH_LIMIT, ATTR_DAT_LOW_LIMIT, ATTR_ZONE_COUNT
 
 DEHUMIDIFICATION_STATUS_MAP: dict[StateType, str] = {
@@ -59,17 +59,21 @@ AIR_CLEANING_STATUS_MAP: dict[StateType, str] = {
 FAN_STATUS_MAP: dict[StateType, str] = {0: "off", 1: "on"}
 
 
-def get_entities(
+def get_candidates(
     entity_class: type[BaseAprilaireSensor],
     coordinator: AprilaireCoordinator,
     unique_id: str,
     descriptions: tuple[AprilaireSensorDescription, ...],
-) -> list[BaseAprilaireSensor]:
-    """Get the entities for a list of sensor descriptions."""
+) -> list[EntityCandidate]:
+    """Return one candidate per sensor, added once the sensor reports it exists."""
 
-    entities = (entity_class(coordinator, description, unique_id) for description in descriptions)
-
-    return [entity for entity in entities if entity.exists]
+    candidates: list[EntityCandidate] = []
+    for description in descriptions:
+        entity = entity_class(coordinator, description, unique_id)
+        candidates.append(
+            (lambda _data, entity=entity: entity.exists, lambda entity=entity: [entity])
+        )
+    return candidates
 
 
 async def async_setup_entry(
@@ -82,27 +86,24 @@ async def async_setup_entry(
     coordinator = config_entry.runtime_data
 
     assert config_entry.unique_id is not None
+    unique_id = config_entry.unique_id
 
-    entities: list[SensorEntity] = [
-        *get_entities(
-            AprilaireHumiditySensor,
-            coordinator,
-            config_entry.unique_id,
-            HUMIDITY_SENSORS,
-        ),
-        *get_entities(
-            AprilaireTemperatureSensor,
-            coordinator,
-            config_entry.unique_id,
-            TEMPERATURE_SENSORS,
-        ),
-        *get_entities(AprilaireStatusSensor, coordinator, config_entry.unique_id, STATUS_SENSORS),
-    ]
-
-    if ATTR_ZONE_COUNT in coordinator.data:
-        entities.append(AprilaireZoneCountSensor(coordinator, config_entry.unique_id))
-
-    async_add_entities(entities)
+    async_add_entities_when_ready(
+        config_entry,
+        coordinator,
+        async_add_entities,
+        [
+            *get_candidates(AprilaireHumiditySensor, coordinator, unique_id, HUMIDITY_SENSORS),
+            *get_candidates(
+                AprilaireTemperatureSensor, coordinator, unique_id, TEMPERATURE_SENSORS
+            ),
+            *get_candidates(AprilaireStatusSensor, coordinator, unique_id, STATUS_SENSORS),
+            (
+                lambda data: ATTR_ZONE_COUNT in data,
+                lambda: [AprilaireZoneCountSensor(coordinator, unique_id)],
+            ),
+        ],
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
