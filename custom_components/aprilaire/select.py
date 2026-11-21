@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from pyaprilaire.const import Attribute
 
 from .coordinator import AprilaireConfigEntry, AprilaireCoordinator
-from .entity import BaseAprilaireEntity
+from .entity import BaseAprilaireEntity, async_add_entities_when_ready
 
 AIR_CLEANING_EVENT_MAP = {0: "off", 3: "event_clean", 4: "allergies"}
 AIR_CLEANING_MODE_MAP = {0: "off", 1: "constant_clean", 2: "automatic"}
@@ -30,64 +30,72 @@ async def async_setup_entry(
 
     assert config_entry.unique_id is not None
 
-    descriptions: list[AprilaireSelectDescription] = []
+    unique_id = config_entry.unique_id
 
-    if coordinator.data.get(Attribute.AIR_CLEANING_AVAILABLE) == 1:
-        descriptions.extend(
-            [
-                AprilaireSelectDescription(
-                    key="air_cleaning_event",
-                    translation_key="air_cleaning_event",
-                    options_map=AIR_CLEANING_EVENT_MAP,
-                    event_value_key=Attribute.AIR_CLEANING_EVENT,
-                    mode_value_key=Attribute.AIR_CLEANING_MODE,
-                    is_event=True,
-                    select_option_fn=coordinator.client.set_air_cleaning,
-                ),
-                AprilaireSelectDescription(
-                    key="air_cleaning_mode",
-                    translation_key="air_cleaning_mode",
-                    options_map=AIR_CLEANING_MODE_MAP,
-                    event_value_key=Attribute.AIR_CLEANING_EVENT,
-                    mode_value_key=Attribute.AIR_CLEANING_MODE,
-                    is_event=False,
-                    select_option_fn=coordinator.client.set_air_cleaning,
-                ),
-            ]
-        )
+    def entities(descriptions: list[AprilaireSelectDescription]) -> list[SelectEntity]:
+        return [
+            AprilaireSelectEntity(coordinator, description, unique_id)
+            for description in descriptions
+        ]
 
-    if coordinator.data.get(Attribute.VENTILATION_AVAILABLE) == 1:
-        descriptions.extend(
-            [
-                AprilaireSelectDescription(
-                    key="fresh_air_event",
-                    translation_key="fresh_air_event",
-                    options_map=FRESH_AIR_EVENT_MAP,
-                    event_value_key=Attribute.FRESH_AIR_EVENT,
-                    mode_value_key=Attribute.FRESH_AIR_MODE,
-                    is_event=True,
-                    select_option_fn=coordinator.client.set_fresh_air,
-                ),
-                AprilaireSelectDescription(
-                    key="fresh_air_mode",
-                    translation_key="fresh_air_mode",
-                    options_map=FRESH_AIR_MODE_MAP,
-                    event_value_key=Attribute.FRESH_AIR_EVENT,
-                    mode_value_key=Attribute.FRESH_AIR_MODE,
-                    is_event=False,
-                    select_option_fn=coordinator.client.set_fresh_air,
-                ),
-            ]
-        )
-
-    entities: list[SelectEntity] = [
-        AprilaireSelectEntity(coordinator, description, config_entry.unique_id)
-        for description in descriptions
+    air_cleaning = [
+        AprilaireSelectDescription(
+            key="air_cleaning_event",
+            translation_key="air_cleaning_event",
+            options_map=AIR_CLEANING_EVENT_MAP,
+            event_value_key=Attribute.AIR_CLEANING_EVENT,
+            mode_value_key=Attribute.AIR_CLEANING_MODE,
+            is_event=True,
+            select_option_fn=coordinator.client.set_air_cleaning,
+        ),
+        AprilaireSelectDescription(
+            key="air_cleaning_mode",
+            translation_key="air_cleaning_mode",
+            options_map=AIR_CLEANING_MODE_MAP,
+            event_value_key=Attribute.AIR_CLEANING_EVENT,
+            mode_value_key=Attribute.AIR_CLEANING_MODE,
+            is_event=False,
+            select_option_fn=coordinator.client.set_air_cleaning,
+        ),
     ]
-    # Always expose standalone Furnace / AC Blower Fan Mode select on Device Controls
-    entities.append(AprilaireFanModeSelectEntity(coordinator, config_entry.unique_id))
+    fresh_air = [
+        AprilaireSelectDescription(
+            key="fresh_air_event",
+            translation_key="fresh_air_event",
+            options_map=FRESH_AIR_EVENT_MAP,
+            event_value_key=Attribute.FRESH_AIR_EVENT,
+            mode_value_key=Attribute.FRESH_AIR_MODE,
+            is_event=True,
+            select_option_fn=coordinator.client.set_fresh_air,
+        ),
+        AprilaireSelectDescription(
+            key="fresh_air_mode",
+            translation_key="fresh_air_mode",
+            options_map=FRESH_AIR_MODE_MAP,
+            event_value_key=Attribute.FRESH_AIR_EVENT,
+            mode_value_key=Attribute.FRESH_AIR_MODE,
+            is_event=False,
+            select_option_fn=coordinator.client.set_fresh_air,
+        ),
+    ]
 
-    async_add_entities(entities)
+    # The standalone furnace / AC blower fan mode select is always exposed.
+    async_add_entities([AprilaireFanModeSelectEntity(coordinator, unique_id)])
+    async_add_entities_when_ready(
+        config_entry,
+        coordinator,
+        async_add_entities,
+        [
+            (
+                lambda data: data.get(Attribute.AIR_CLEANING_AVAILABLE) == 1,
+                lambda: entities(air_cleaning),
+            ),
+            (
+                lambda data: data.get(Attribute.VENTILATION_AVAILABLE) == 1,
+                lambda: entities(fresh_air),
+            ),
+        ],
+    )
 
 
 @dataclass(frozen=True, kw_only=True)

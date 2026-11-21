@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import ATTR_HEAT_BLAST, AprilaireConfigEntry, AprilaireCoordinator
-from .entity import BaseAprilaireEntity
+from .entity import BaseAprilaireEntity, async_add_entities_when_ready
 
 
 async def async_setup_entry(
@@ -19,8 +19,18 @@ async def async_setup_entry(
     coordinator = config_entry.runtime_data
     assert config_entry.unique_id is not None
 
-    if ATTR_HEAT_BLAST in coordinator.data:
-        async_add_entities([AprilaireHeatBlastSwitch(coordinator, config_entry.unique_id)])
+    unique_id = config_entry.unique_id
+    async_add_entities_when_ready(
+        config_entry,
+        coordinator,
+        async_add_entities,
+        [
+            (
+                lambda data: ATTR_HEAT_BLAST in data,
+                lambda: [AprilaireHeatBlastSwitch(coordinator, unique_id)],
+            )
+        ],
+    )
 
 
 class AprilaireHeatBlastSwitch(BaseAprilaireEntity, SwitchEntity):

@@ -1,14 +1,58 @@
 """Base functionality for Aprilaire entities."""
 
 import logging
-from typing import override
+from collections.abc import Callable, Iterable
+from typing import Any, override
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
+from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import BaseCoordinatorEntity
 from pyaprilaire.const import Attribute
 
 from .coordinator import AprilaireCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+type EntityCandidate = tuple[Callable[[dict[str, Any]], bool], Callable[[], Iterable[Entity]]]
+
+
+@callback
+def async_add_entities_when_ready(
+    config_entry: ConfigEntry,
+    coordinator: AprilaireCoordinator,
+    async_add_entities: Callable[[list[Entity]], None],
+    candidates: Iterable[EntityCandidate],
+) -> None:
+    """Add each candidate's entities once its predicate holds for the data.
+
+    Initialization can finish with reads timed out (the 6003 is slow right
+    after an HA restart), so data that gates an entity may only arrive later
+    through COS or polling. Checking once at setup would leave those entities
+    uncreated until the next reload.
+    """
+    pending = list(candidates)
+    remove_listener: Callable[[], None] | None = None
+
+    @callback
+    def _add_ready() -> None:
+        nonlocal remove_listener
+        ready = [candidate for candidate in pending if candidate[0](coordinator.data)]
+        if not ready:
+            return
+        for candidate in ready:
+            pending.remove(candidate)
+        entities = [entity for _, factory in ready for entity in factory()]
+        if entities:
+            async_add_entities(entities)
+        if not pending and remove_listener is not None:
+            remove_listener()
+            remove_listener = None
+
+    _add_ready()
+    if pending:
+        remove_listener = coordinator.async_add_listener(_add_ready)
+        config_entry.async_on_unload(lambda: remove_listener() if remove_listener else None)
 
 
 class BaseAprilaireEntity(BaseCoordinatorEntity[AprilaireCoordinator]):
